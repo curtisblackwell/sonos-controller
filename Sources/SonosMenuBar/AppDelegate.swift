@@ -1,0 +1,90 @@
+import AppKit
+import os.log
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let log = Logger(subsystem: "com.curtis.sonos-controller", category: "appdelegate")
+
+    private let statusMenu = StatusMenuController()
+    private let mediaKeyTap = MediaKeyTap()
+    private let discovery = SonosDiscovery()
+    private var permissionPollTimer: Timer?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        statusMenu.onGrantAccessTapped = {
+            PermissionsManager.requestAccessibility()
+            PermissionsManager.openAccessibilitySettings()
+        }
+        statusMenu.onSelectGroup = { group in
+            PreferencesStore.setActiveGroup(group)
+        }
+        statusMenu.onRescanTapped = { [weak self] in
+            self?.runDiscovery()
+        }
+
+        mediaKeyTap.onPlayPause = {
+            Self.log.notice("onPlayPause fired, target IP=\(PreferencesStore.activeGroupCoordinatorIP ?? "nil", privacy: .public)")
+            guard let ip = PreferencesStore.activeGroupCoordinatorIP else { return }
+            SonosControl.togglePlayPause(ip: ip)
+        }
+        mediaKeyTap.onNext = {
+            Self.log.notice("onNext fired, target IP=\(PreferencesStore.activeGroupCoordinatorIP ?? "nil", privacy: .public)")
+            guard let ip = PreferencesStore.activeGroupCoordinatorIP else { return }
+            SonosControl.send(action: .next, to: ip)
+        }
+        mediaKeyTap.onPrevious = {
+            Self.log.notice("onPrevious fired, target IP=\(PreferencesStore.activeGroupCoordinatorIP ?? "nil", privacy: .public)")
+            guard let ip = PreferencesStore.activeGroupCoordinatorIP else { return }
+            SonosControl.send(action: .previous, to: ip)
+        }
+
+        PermissionsManager.requestAccessibility()
+        refreshPermissionState()
+        startPermissionPolling()
+
+        runDiscovery()
+    }
+
+    private func refreshPermissionState() {
+        let granted = PermissionsManager.accessibilityGranted()
+        Self.log.notice("accessibilityGranted=\(granted, privacy: .public)")
+        statusMenu.update(accessibilityGranted: granted)
+        if granted {
+            let installed = mediaKeyTap.install()
+            Self.log.notice("mediaKeyTap.install() returned \(installed, privacy: .public)")
+        }
+    }
+
+    private func startPermissionPolling() {
+        permissionPollTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            self?.refreshPermissionState()
+        }
+    }
+
+    private func runDiscovery() {
+        discovery.discover { [weak self] devices in
+            self?.resolveGroups(candidateIPs: devices.map(\.ipAddress))
+        }
+    }
+
+    /// GetZoneGroupState can be asked of any single reachable ZonePlayer and returns the
+    /// whole household's topology, so we just need one candidate to answer - try each in
+    /// turn in case the first one is unreachable.
+    private func resolveGroups(candidateIPs: [String], index: Int = 0) {
+        guard index < candidateIPs.count else {
+            statusMenu.update(groups: [])
+            return
+        }
+        SonosTopology.fetchGroups(from: candidateIPs[index]) { [weak self] groups in
+            guard let self else { return }
+            guard !groups.isEmpty else {
+                self.resolveGroups(candidateIPs: candidateIPs, index: index + 1)
+                return
+            }
+            self.statusMenu.update(groups: groups)
+            if let activeID = PreferencesStore.activeGroupID,
+               let match = groups.first(where: { $0.id == activeID }) {
+                PreferencesStore.setActiveGroup(match)
+            }
+        }
+    }
+}

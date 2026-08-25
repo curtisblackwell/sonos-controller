@@ -1,0 +1,77 @@
+import AppKit
+
+final class StatusMenuController: NSObject {
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    private var groups: [SonosGroup] = []
+    private var accessibilityGranted = false
+
+    var onGrantAccessTapped: (() -> Void)?
+    var onSelectGroup: ((SonosGroup) -> Void)?
+    var onRescanTapped: (() -> Void)?
+
+    override init() {
+        super.init()
+        statusItem.button?.image = NSImage(systemSymbolName: "hifispeaker.and.homepod", accessibilityDescription: "Sonos Controller")
+        statusItem.button?.image?.isTemplate = true
+        rebuildMenu()
+    }
+
+    func update(groups: [SonosGroup]) {
+        self.groups = groups
+        rebuildMenu()
+    }
+
+    func update(accessibilityGranted: Bool) {
+        self.accessibilityGranted = accessibilityGranted
+        rebuildMenu()
+    }
+
+    private func rebuildMenu() {
+        let menu = NSMenu()
+
+        if !accessibilityGranted {
+            let item = NSMenuItem(title: "Grant Accessibility Access…", action: #selector(grantAccess), keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+            menu.addItem(.separator())
+        }
+
+        if groups.isEmpty {
+            let placeholder = NSMenuItem(title: "No Speakers Found", action: nil, keyEquivalent: "")
+            placeholder.isEnabled = false
+            menu.addItem(placeholder)
+        } else {
+            for group in groups {
+                let item = NSMenuItem(title: group.displayName, action: #selector(selectGroup(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = group
+                item.state = group.id == PreferencesStore.activeGroupID ? .on : .off
+                menu.addItem(item)
+            }
+        }
+
+        menu.addItem(.separator())
+        let rescan = NSMenuItem(title: "Rescan for Speakers", action: #selector(rescan), keyEquivalent: "")
+        rescan.target = self
+        menu.addItem(rescan)
+
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+
+        statusItem.menu = menu
+    }
+
+    @objc private func grantAccess() {
+        onGrantAccessTapped?()
+    }
+
+    @objc private func selectGroup(_ sender: NSMenuItem) {
+        guard let group = sender.representedObject as? SonosGroup else { return }
+        onSelectGroup?(group)
+        rebuildMenu()
+    }
+
+    @objc private func rescan() {
+        onRescanTapped?()
+    }
+}

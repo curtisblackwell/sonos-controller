@@ -1,0 +1,32 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Built app bundle (produced by Scripts/build-app.sh)
+SonosController.app/
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+*.moved-aside
+
+# Signing / secrets (dev certs live in the keychain, but never commit these)
+*.p12
+*.cer
+*.certSigningRequest
+*.mobileprovision
+*.pem
+*.key
+
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Claude Code
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
