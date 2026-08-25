@@ -55,11 +55,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             SonosControl.send(action: .previous, to: ip)
         }
 
+        NSApp.mainMenu = MainMenu.build(appName: "SonosController")
+
         PermissionsManager.requestAccessibility()
         refreshPermissionState()
         startPermissionPolling()
 
         runDiscovery()
+
+        // A .regular app that launches with nothing on screen reads as broken, and the
+        // window is the main surface now.
+        groupingWindow.present()
+    }
+
+    /// The media key tap is the point of the app and it lives in the process, not in a
+    /// window - closing the last window has to leave us running.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    /// Clicking the Dock icon with no window open should bring the editor back rather than
+    /// doing nothing.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows { groupingWindow.present() }
+        return true
     }
 
     private func refreshPermissionState() {

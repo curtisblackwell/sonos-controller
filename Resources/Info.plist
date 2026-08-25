@@ -18,8 +18,6 @@
     <string>14.0</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>SonosController finds your Sonos speakers on this network and sends them play, pause, and track commands.</string>
-    <key>LSUIElement</key>
-    <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
     <!-- Payload for dragging a room between groups in the editor. Declared so the drag
