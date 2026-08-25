@@ -114,6 +114,11 @@ private final class ZoneGroupTopologyParser: NSObject, XMLParserDelegate {
         case "ZoneGroupMember":
             // Nested <Satellite> elements (bonded rears/subs) are a different tag name
             // and are intentionally skipped - they aren't independently controllable rooms.
+            // Members flagged Invisible="1" (paired-away players) and IsZoneBridge="1"
+            // (Boost/Bridge) come through as ordinary ZoneGroupMembers but have no
+            // playback of their own, so listing them would offer groups that ignore
+            // every transport command sent to them.
+            guard attributeDict["Invisible"] != "1", attributeDict["IsZoneBridge"] != "1" else { break }
             if let uuid = attributeDict["UUID"], let zoneName = attributeDict["ZoneName"], let location = attributeDict["Location"] {
                 currentMembers.append(Member(uuid: uuid, zoneName: zoneName, location: location))
             }

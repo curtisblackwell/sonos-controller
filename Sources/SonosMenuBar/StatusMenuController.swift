@@ -6,6 +6,7 @@ final class StatusMenuController: NSObject {
     private var accessibilityGranted = false
 
     var onGrantAccessTapped: (() -> Void)?
+    var onOpenLocalNetworkSettingsTapped: (() -> Void)?
     var onSelectGroup: ((SonosGroup) -> Void)?
     var onRescanTapped: (() -> Void)?
 
@@ -40,6 +41,11 @@ final class StatusMenuController: NSObject {
             let placeholder = NSMenuItem(title: "No Speakers Found", action: nil, keyEquivalent: "")
             placeholder.isEnabled = false
             menu.addItem(placeholder)
+            // A denied Local Network prompt is the most common cause and is otherwise
+            // invisible - the app just never sees a speaker again.
+            let localNetwork = NSMenuItem(title: "Check Local Network Access…", action: #selector(openLocalNetworkSettings), keyEquivalent: "")
+            localNetwork.target = self
+            menu.addItem(localNetwork)
         } else {
             for group in groups {
                 let item = NSMenuItem(title: group.displayName, action: #selector(selectGroup(_:)), keyEquivalent: "")
@@ -69,6 +75,10 @@ final class StatusMenuController: NSObject {
         guard let group = sender.representedObject as? SonosGroup else { return }
         onSelectGroup?(group)
         rebuildMenu()
+    }
+
+    @objc private func openLocalNetworkSettings() {
+        onOpenLocalNetworkSettingsTapped?()
     }
 
     @objc private func rescan() {

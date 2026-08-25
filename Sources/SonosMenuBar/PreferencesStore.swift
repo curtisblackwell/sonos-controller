@@ -20,6 +20,15 @@ enum PreferencesStore {
         set { UserDefaults.standard.set(newValue, forKey: ipKey) }
     }
 
+    /// Used when the saved group no longer exists in a freshly fetched topology - leaving
+    /// the stale coordinator IP behind means media keys keep POSTing to a player that is
+    /// no longer a coordinator, which fails silently.
+    static func clearActiveGroup() {
+        activeGroupID = nil
+        activeGroupDisplayName = nil
+        activeGroupCoordinatorIP = nil
+    }
+
     static func setActiveGroup(_ group: SonosGroup) {
         activeGroupID = group.id
         activeGroupDisplayName = group.displayName

@@ -43,3 +43,15 @@ struct SSDPParsingTests {
         #expect(parser.deviceType.contains("ZonePlayer"))
     }
 }
+
+struct MulticastInterfaceTests {
+    /// Can't assert a specific address - this just pins the invariants the M-SEARCH send
+    /// path relies on: no loopback (127.x) and no duplicate interface addresses, since
+    /// each one costs an extra datagram per search.
+    @Test func excludesLoopbackAndDuplicates() {
+        let addresses = SonosDiscovery.multicastInterfaceAddresses()
+        let octets = addresses.map { UInt32(bigEndian: $0.s_addr) >> 24 }
+        #expect(!octets.contains(127))
+        #expect(Set(addresses.map(\.s_addr)).count == addresses.count)
+    }
+}

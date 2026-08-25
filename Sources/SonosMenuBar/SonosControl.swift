@@ -55,9 +55,17 @@ enum SonosControl {
         return String(text[start.upperBound..<end.lowerBound])
     }
 
+    /// Toggling needs to know the current state, and there is no "toggle" UPnP action.
+    /// If GetTransportInfo fails or comes back unparseable we do nothing rather than
+    /// assume "not playing" - guessing turns a dropped packet mid-playback into a Play,
+    /// so the pause press appears to be ignored.
     static func togglePlayPause(ip: String) {
         send(action: .getTransportInfo, to: ip) { data in
-            let isPlaying = data.flatMap(currentTransportState) == "PLAYING"
+            guard let state = data.flatMap(currentTransportState) else {
+                log.error("Could not read transport state from \(ip, privacy: .public), ignoring play/pause")
+                return
+            }
+            let isPlaying = state == "PLAYING" || state == "TRANSITIONING"
             send(action: isPlaying ? .pause : .play, to: ip)
         }
     }

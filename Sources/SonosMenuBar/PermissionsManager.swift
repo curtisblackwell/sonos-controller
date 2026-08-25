@@ -17,4 +17,12 @@ enum PermissionsManager {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else { return }
         NSWorkspace.shared.open(url)
     }
+
+    /// There is no API to query or re-prompt for Local Network access - the system asks
+    /// once, and a denial silently blackholes SSDP forever. All we can do is point the
+    /// user at the toggle when discovery turns up nothing.
+    static func openLocalNetworkSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork") else { return }
+        NSWorkspace.shared.open(url)
+    }
 }

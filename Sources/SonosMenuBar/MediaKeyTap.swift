@@ -23,10 +23,21 @@ final class MediaKeyTap {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
-    /// Returns true if the tap was installed. Safe to call again later once permission is granted.
+    /// Returns true if a live tap is in place. Safe to call repeatedly - if an existing
+    /// tap has gone dead (macOS invalidates it when Accessibility is revoked, and does not
+    /// revive it when the permission comes back) it is torn down and rebuilt rather than
+    /// reported as still working.
     @discardableResult
     func install() -> Bool {
-        guard eventTap == nil else { return true }
+        if let tap = eventTap {
+            if CFMachPortIsValid(tap) {
+                if CGEvent.tapIsEnabled(tap: tap) { return true }
+                CGEvent.tapEnable(tap: tap, enable: true)
+                if CGEvent.tapIsEnabled(tap: tap) { return true }
+            }
+            Self.log.notice("Existing media key tap is dead, rebuilding")
+            teardown()
+        }
 
         let eventMask: CGEventMask = 1 << systemDefinedEventType
         let callback: CGEventTapCallBack = { proxy, type, cgEvent, refcon in
@@ -57,6 +68,18 @@ final class MediaKeyTap {
         CGEvent.tapEnable(tap: tap, enable: true)
         Self.log.notice("Media key tap installed")
         return true
+    }
+
+    private func teardown() {
+        if let source = runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
+        }
+        runLoopSource = nil
+        if let tap = eventTap, CFMachPortIsValid(tap) {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
+        }
+        eventTap = nil
     }
 
     private func handle(proxy: CGEventTapProxy, type: CGEventType, cgEvent: CGEvent) -> Unmanaged<CGEvent>? {

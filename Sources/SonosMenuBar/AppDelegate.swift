@@ -14,6 +14,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             PermissionsManager.requestAccessibility()
             PermissionsManager.openAccessibilitySettings()
         }
+        statusMenu.onOpenLocalNetworkSettingsTapped = {
+            PermissionsManager.openLocalNetworkSettings()
+        }
         statusMenu.onSelectGroup = { group in
             PreferencesStore.setActiveGroup(group)
         }
@@ -80,11 +83,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.resolveGroups(candidateIPs: candidateIPs, index: index + 1)
                 return
             }
-            self.statusMenu.update(groups: groups)
-            if let activeID = PreferencesStore.activeGroupID,
-               let match = groups.first(where: { $0.id == activeID }) {
-                PreferencesStore.setActiveGroup(match)
+            // Reconcile the saved selection before rebuilding the menu, so its checkmark
+            // reflects what we just resolved. A group that has disappeared from the
+            // topology (regrouped elsewhere) is cleared rather than left pointing at an
+            // IP that is no longer a coordinator.
+            if let activeID = PreferencesStore.activeGroupID {
+                if let match = groups.first(where: { $0.id == activeID }) {
+                    PreferencesStore.setActiveGroup(match)
+                } else {
+                    Self.log.notice("Saved group \(activeID, privacy: .public) is gone from the topology, clearing it")
+                    PreferencesStore.clearActiveGroup()
+                }
             }
+            self.statusMenu.update(groups: groups)
         }
     }
 }
