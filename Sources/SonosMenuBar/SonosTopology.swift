@@ -52,15 +52,30 @@ enum SonosTopology {
         guard topology.parse(xmlString: extractor.zoneGroupStateXML) else { return [] }
 
         return topology.groups.compactMap { group -> SonosGroup? in
-            guard let coordinator = group.members.first(where: { $0.uuid == group.coordinatorUUID }),
-                  let coordinatorIP = URL(string: coordinator.location)?.host else { return nil }
-            let otherNames = group.members
+            let rooms = group.members.compactMap { member -> SonosRoom? in
+                guard let ip = URL(string: member.location)?.host else { return nil }
+                return SonosRoom(uuid: member.uuid, name: member.zoneName, ipAddress: ip)
+            }
+            // A group whose coordinator we can't reach is unusable - we'd have nowhere to
+            // send its transport commands - so drop it rather than list it.
+            guard let coordinator = rooms.first(where: { $0.uuid == group.coordinatorUUID }) else { return nil }
+            let others = rooms
                 .filter { $0.uuid != group.coordinatorUUID }
-                .map(\.zoneName)
-                .sorted()
-            let displayName = ([coordinator.zoneName] + otherNames).joined(separator: " + ")
-            return SonosGroup(id: group.coordinatorUUID, displayName: displayName, coordinatorIP: coordinatorIP)
+                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            return SonosGroup(
+                id: group.coordinatorUUID,
+                coordinatorIP: coordinator.ipAddress,
+                members: [coordinator] + others
+            )
         }
+    }
+
+    /// Every controllable room in the household, sorted by name. The editor needs this flat
+    /// view as well as the grouped one.
+    static func allRooms(in groups: [SonosGroup]) -> [SonosRoom] {
+        groups
+            .flatMap(\.members)
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 }
 

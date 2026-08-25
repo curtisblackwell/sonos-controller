@@ -15,12 +15,28 @@
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
-    <string>12.0</string>
+    <string>14.0</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>SonosController finds your Sonos speakers on this network and sends them play, pause, and track commands.</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <!-- Payload for dragging a room between groups in the editor. Declared so the drag
+         type is registered rather than synthesised at runtime; it is app-internal and
+         deliberately not associated with any file extension. -->
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.curtis.sonos-controller.room</string>
+            <key>UTTypeDescription</key>
+            <string>Sonos Room</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>

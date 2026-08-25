@@ -36,3 +36,37 @@ struct SOAPEnvelopeTests {
         #expect(SonosControl.currentTransportState(from: Data(body.utf8)) == "PAUSED_PLAYBACK")
     }
 }
+
+struct GroupingEnvelopeTests {
+    @Test func joinEnvelopePointsAtCoordinatorRincon() {
+        let envelope = SonosControl.soapEnvelope(
+            action: .setAVTransportURI(uri: "x-rincon:RINCON_LIVINGROOM01400", metadata: "")
+        )
+        #expect(envelope.contains("<u:SetAVTransportURI xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\">"))
+        #expect(envelope.contains("<InstanceID>0</InstanceID>"))
+        #expect(envelope.contains("<CurrentURI>x-rincon:RINCON_LIVINGROOM01400</CurrentURI>"))
+        // Empty metadata still has to be present - the action takes both arguments.
+        #expect(envelope.contains("<CurrentURIMetaData></CurrentURIMetaData>"))
+    }
+
+    @Test func ungroupEnvelopeTakesOnlyInstanceID() {
+        let envelope = SonosControl.soapEnvelope(action: .becomeCoordinatorOfStandaloneGroup)
+        #expect(envelope.contains("<u:BecomeCoordinatorOfStandaloneGroup"))
+        #expect(envelope.contains("<InstanceID>0</InstanceID>"))
+        #expect(!envelope.contains("<CurrentURI>"))
+    }
+
+    @Test func argumentValuesAreXMLEscaped() {
+        let envelope = SonosControl.soapEnvelope(
+            action: .setAVTransportURI(uri: "http://host/a?x=1&y=2", metadata: "<DIDL-Lite>")
+        )
+        #expect(envelope.contains("<CurrentURI>http://host/a?x=1&amp;y=2</CurrentURI>"))
+        #expect(envelope.contains("<CurrentURIMetaData>&lt;DIDL-Lite&gt;</CurrentURIMetaData>"))
+    }
+
+    @Test func actionNamesMatchTheUPnPService() {
+        #expect(SonosAction.setAVTransportURI(uri: "", metadata: "").name == "SetAVTransportURI")
+        #expect(SonosAction.becomeCoordinatorOfStandaloneGroup.name == "BecomeCoordinatorOfStandaloneGroup")
+        #expect(SonosAction.getTransportInfo.name == "GetTransportInfo")
+    }
+}

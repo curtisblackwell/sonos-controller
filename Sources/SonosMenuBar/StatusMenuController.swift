@@ -9,6 +9,7 @@ final class StatusMenuController: NSObject {
     var onOpenLocalNetworkSettingsTapped: (() -> Void)?
     var onSelectGroup: ((SonosGroup) -> Void)?
     var onRescanTapped: (() -> Void)?
+    var onManageGroupsTapped: (() -> Void)?
 
     override init() {
         super.init()
@@ -19,6 +20,12 @@ final class StatusMenuController: NSObject {
 
     func update(groups: [SonosGroup]) {
         self.groups = groups
+        rebuildMenu()
+    }
+
+    /// The editor window can change the media key target too; this re-marks the menu
+    /// without waiting for the next topology fetch.
+    func refreshActiveGroupMarks() {
         rebuildMenu()
     }
 
@@ -47,6 +54,9 @@ final class StatusMenuController: NSObject {
             localNetwork.target = self
             menu.addItem(localNetwork)
         } else {
+            let header = NSMenuItem(title: "Media Keys Control", action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
             for group in groups {
                 let item = NSMenuItem(title: group.displayName, action: #selector(selectGroup(_:)), keyEquivalent: "")
                 item.target = self
@@ -57,6 +67,10 @@ final class StatusMenuController: NSObject {
         }
 
         menu.addItem(.separator())
+        let manage = NSMenuItem(title: "Manage Groups…", action: #selector(manageGroups), keyEquivalent: "g")
+        manage.target = self
+        menu.addItem(manage)
+
         let rescan = NSMenuItem(title: "Rescan for Speakers", action: #selector(rescan), keyEquivalent: "")
         rescan.target = self
         menu.addItem(rescan)
@@ -79,6 +93,10 @@ final class StatusMenuController: NSObject {
 
     @objc private func openLocalNetworkSettings() {
         onOpenLocalNetworkSettingsTapped?()
+    }
+
+    @objc private func manageGroups() {
+        onManageGroupsTapped?()
     }
 
     @objc private func rescan() {

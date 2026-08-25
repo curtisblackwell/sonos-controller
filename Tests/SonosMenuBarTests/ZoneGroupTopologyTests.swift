@@ -69,6 +69,69 @@ struct ZoneGroupTopologyTests {
         #expect(groups.first?.coordinatorIP == "192.168.1.50")
     }
 
+    @Test func surfacesEveryMemberWithUUIDAndIP() {
+        let innerXML = """
+        <ZoneGroups>
+          <ZoneGroup Coordinator="RINCON_LIVINGROOM01400" ID="RINCON_LIVINGROOM01400:1">
+            <ZoneGroupMember UUID="RINCON_LIVINGROOM01400" ZoneName="Living Room" Location="http://192.168.1.50:1400/xml/device_description.xml"/>
+            <ZoneGroupMember UUID="RINCON_KITCHEN01400" ZoneName="Kitchen" Location="http://192.168.1.51:1400/xml/device_description.xml"/>
+          </ZoneGroup>
+        </ZoneGroups>
+        """
+        let groups = SonosTopology.parseGroups(from: Data(soapResponse(wrapping: innerXML).utf8))
+        let group = try! #require(groups.first)
+
+        // Coordinator first, then the rest by name - the order displayName reads in.
+        #expect(group.members.map(\.name) == ["Living Room", "Kitchen"])
+        #expect(group.members.map(\.uuid) == ["RINCON_LIVINGROOM01400", "RINCON_KITCHEN01400"])
+        #expect(group.members.map(\.ipAddress) == ["192.168.1.50", "192.168.1.51"])
+        #expect(group.coordinator?.uuid == "RINCON_LIVINGROOM01400")
+        #expect(!group.isStandalone)
+    }
+
+    @Test func standaloneRoomIsAGroupOfOne() {
+        let innerXML = """
+        <ZoneGroups>
+          <ZoneGroup Coordinator="RINCON_OFFICE01400" ID="RINCON_OFFICE01400:1">
+            <ZoneGroupMember UUID="RINCON_OFFICE01400" ZoneName="Office" Location="http://192.168.1.52:1400/xml/device_description.xml"/>
+          </ZoneGroup>
+        </ZoneGroups>
+        """
+        let groups = SonosTopology.parseGroups(from: Data(soapResponse(wrapping: innerXML).utf8))
+        #expect(groups.first?.isStandalone == true)
+        #expect(groups.first?.displayName == "Office")
+    }
+
+    @Test func allRoomsFlattensAndSortsByName() {
+        let innerXML = """
+        <ZoneGroups>
+          <ZoneGroup Coordinator="RINCON_LIVINGROOM01400" ID="RINCON_LIVINGROOM01400:1">
+            <ZoneGroupMember UUID="RINCON_LIVINGROOM01400" ZoneName="Living Room" Location="http://192.168.1.50:1400/xml/device_description.xml"/>
+            <ZoneGroupMember UUID="RINCON_KITCHEN01400" ZoneName="Kitchen" Location="http://192.168.1.51:1400/xml/device_description.xml"/>
+          </ZoneGroup>
+          <ZoneGroup Coordinator="RINCON_OFFICE01400" ID="RINCON_OFFICE01400:1">
+            <ZoneGroupMember UUID="RINCON_OFFICE01400" ZoneName="Office" Location="http://192.168.1.52:1400/xml/device_description.xml"/>
+          </ZoneGroup>
+        </ZoneGroups>
+        """
+        let groups = SonosTopology.parseGroups(from: Data(soapResponse(wrapping: innerXML).utf8))
+        #expect(SonosTopology.allRooms(in: groups).map(\.name) == ["Kitchen", "Living Room", "Office"])
+    }
+
+    @Test func dropsGroupWhoseCoordinatorHasNoUsableLocation() {
+        // Coordinator is present but its Location has no host, so there is nowhere to send
+        // the group's transport commands.
+        let innerXML = """
+        <ZoneGroups>
+          <ZoneGroup Coordinator="RINCON_BROKEN01400" ID="RINCON_BROKEN01400:1">
+            <ZoneGroupMember UUID="RINCON_BROKEN01400" ZoneName="Broken" Location="not-a-url"/>
+            <ZoneGroupMember UUID="RINCON_KITCHEN01400" ZoneName="Kitchen" Location="http://192.168.1.51:1400/xml/device_description.xml"/>
+          </ZoneGroup>
+        </ZoneGroups>
+        """
+        #expect(SonosTopology.parseGroups(from: Data(soapResponse(wrapping: innerXML).utf8)).isEmpty)
+    }
+
     @Test func returnsEmptyOnMalformedResponse() {
         let groups = SonosTopology.parseGroups(from: Data("not xml".utf8))
         #expect(groups.isEmpty)

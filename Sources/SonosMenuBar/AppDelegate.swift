@@ -7,7 +7,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let statusMenu = StatusMenuController()
     private let mediaKeyTap = MediaKeyTap()
     private let discovery = SonosDiscovery()
+    private let topology = TopologyModel()
     private var permissionPollTimer: Timer?
+    private lazy var groupingWindow = GroupingWindowController(model: topology)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusMenu.onGrantAccessTapped = {
@@ -17,10 +19,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusMenu.onOpenLocalNetworkSettingsTapped = {
             PermissionsManager.openLocalNetworkSettings()
         }
-        statusMenu.onSelectGroup = { group in
-            PreferencesStore.setActiveGroup(group)
+        // Both surfaces pick the media key target, so each has to tell the other.
+        statusMenu.onSelectGroup = { [weak self] group in
+            self?.topology.setActiveGroup(group)
+        }
+        topology.onActiveGroupChanged = { [weak self] in
+            self?.statusMenu.refreshActiveGroupMarks()
         }
         statusMenu.onRescanTapped = { [weak self] in
+            self?.runDiscovery()
+        }
+        statusMenu.onManageGroupsTapped = { [weak self] in
+            self?.groupingWindow.present()
+        }
+
+        // The editor's Refresh button and its post-grouping settle both re-run discovery,
+        // which is also what picks up rooms that were regrouped from the Sonos app.
+        topology.refreshHandler = { [weak self] in
             self?.runDiscovery()
         }
 
@@ -75,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func resolveGroups(candidateIPs: [String], index: Int = 0) {
         guard index < candidateIPs.count else {
             statusMenu.update(groups: [])
+            topology.update(groups: [])
             return
         }
         SonosTopology.fetchGroups(from: candidateIPs[index]) { [weak self] groups in
@@ -96,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             self.statusMenu.update(groups: groups)
+            self.topology.update(groups: groups)
         }
     }
 }
