@@ -7,6 +7,7 @@ import SwiftUI
 struct GroupingView: View {
     @ObservedObject var model: TopologyModel
     @ObservedObject var volume: VolumeModel
+    @ObservedObject var playback: PlaybackModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -306,6 +307,7 @@ struct GroupingView: View {
 
     private var footer: some View {
         HStack(spacing: 12) {
+            transportControls
             if model.isBusy {
                 ProgressView().controlSize(.small)
                 Text("Updating…").foregroundStyle(.secondary).font(.callout)
@@ -323,6 +325,38 @@ struct GroupingView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// Only shown once there's an active group to target - matches the star toggle that
+    /// picks one, and the media keys these buttons mirror.
+    @ViewBuilder
+    private var transportControls: some View {
+        if model.activeGroupID != nil {
+            HStack(spacing: 4) {
+                transportButton(systemImage: "backward.fill", help: "Previous Track") {
+                    playback.previous()
+                }
+                transportButton(
+                    systemImage: playback.isPlaying == true ? "pause.fill" : "play.fill",
+                    help: playback.isPlaying == true ? "Pause" : "Play"
+                ) {
+                    playback.togglePlayPause()
+                }
+                .disabled(playback.isPlaying == nil)
+                transportButton(systemImage: "forward.fill", help: "Next Track") {
+                    playback.next()
+                }
+            }
+        }
+    }
+
+    private func transportButton(systemImage: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
     }
 
     /// Replaces what used to be a Refresh button. The household pushes its changes now, and

@@ -10,11 +10,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let topology = TopologyModel()
     private let topologySubscriber = TopologySubscriber()
     private let volume = VolumeModel()
+    private let playback = PlaybackModel()
     private var permissionPollTimer: Timer?
     /// Every player the last scan found, so a refresh has somewhere to ask without running
     /// another one.
     private var knownDeviceIPs: [String] = []
-    private lazy var groupingWindow = GroupingWindowController(model: topology, volume: volume)
+    private lazy var groupingWindow = GroupingWindowController(model: topology, volume: volume, playback: playback)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Before anything reads the saved group - the bundle ID rename moved us to a new
@@ -35,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         topology.onActiveGroupChanged = { [weak self] in
             self?.statusMenu.refreshActiveGroupMarks()
             self?.refreshVolumeKeyAvailability()
+            self?.playback.update(coordinatorIP: PreferencesStore.activeGroupCoordinatorIP)
         }
         statusMenu.onRescanTapped = { [weak self] in
             self?.runDiscovery()
@@ -260,6 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         topology.update(groups: groups)
         volume.update(groups: groups)
         refreshVolumeKeyAvailability()
+        playback.update(coordinatorIP: PreferencesStore.activeGroupCoordinatorIP)
     }
 
     private func adjustActiveGroupVolume(by adjustment: Int) {
