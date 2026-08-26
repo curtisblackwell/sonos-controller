@@ -10,7 +10,7 @@ import os.log
 /// connect to it, so it reports who sent each event and lets the caller decide whether to
 /// believe it.
 final class GENAEventListener {
-    private static let log = Logger(subsystem: "com.curtis.sonos-controller", category: "gena-listener")
+    private static let log = Logger(subsystem: "com.curtisblackwell.sonos-controller", category: "gena-listener")
     static let callbackPath = "/notify"
 
     /// A speaker that has opened a connection but not finished a request by then is either
@@ -30,7 +30,7 @@ final class GENAEventListener {
     /// subscribe path without hopping queues.
     private(set) var port: UInt16?
 
-    private let queue = DispatchQueue(label: "com.curtis.sonos-controller.gena-listener")
+    private let queue = DispatchQueue(label: "com.curtisblackwell.sonos-controller.gena-listener")
     private var listener: NWListener?
     /// One per open connection. NWConnection isn't retained by the listener, so dropping an
     /// entry here is what tears the connection down.

@@ -21,7 +21,7 @@ extension UTType {
     /// `conformingTo` matters only outside the app bundle - via `swift run`, say, where the
     /// Info.plist declaration isn't loaded and the type would otherwise conform to nothing
     /// and match no drag.
-    static let sonosRoom = UTType(exportedAs: "com.curtis.sonos-controller.room", conformingTo: .data)
+    static let sonosRoom = UTType(exportedAs: "com.curtisblackwell.sonos-controller.room", conformingTo: .data)
 }
 
 extension SonosRoom: Transferable {

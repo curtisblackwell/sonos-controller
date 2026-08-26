@@ -5,7 +5,7 @@ import os.log
 /// methods against a service's event URL, and URLSession forwards a method it doesn't know
 /// as-is, so there is no socket work here.
 enum GENA {
-    private static let log = Logger(subsystem: "com.curtis.sonos-controller", category: "gena")
+    private static let log = Logger(subsystem: "com.curtisblackwell.sonos-controller", category: "gena")
 
     /// How long to ask a speaker to hold the subscription for.
     ///

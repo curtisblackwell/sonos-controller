@@ -11,13 +11,13 @@ import os.log
 /// interleaved results that don't match what the user asked for. The queue also gives us a
 /// single point to refresh from once everything has settled.
 final class SonosGrouping {
-    private static let log = Logger(subsystem: "com.curtis.sonos-controller", category: "grouping")
+    private static let log = Logger(subsystem: "com.curtisblackwell.sonos-controller", category: "grouping")
 
     /// Sonos needs a moment after a grouping command before GetZoneGroupState reflects it.
     /// Refreshing immediately reliably returns the *old* topology and the UI snaps back.
     private static let settleDelay: TimeInterval = 0.6
 
-    private let queue = DispatchQueue(label: "com.curtis.sonos-controller.grouping")
+    private let queue = DispatchQueue(label: "com.curtisblackwell.sonos-controller.grouping")
     private let semaphore = DispatchSemaphore(value: 0)
 
     /// Called on the main thread once the queue has drained, so the caller can refetch.

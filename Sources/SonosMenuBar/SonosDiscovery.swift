@@ -2,14 +2,14 @@ import Foundation
 import os.log
 
 final class SonosDiscovery: NSObject {
-    private static let log = Logger(subsystem: "com.curtis.sonos-controller", category: "discovery")
+    private static let log = Logger(subsystem: "com.curtisblackwell.sonos-controller", category: "discovery")
     private static let ssdpAddress = "239.255.255.250"
     private static let ssdpPort: UInt16 = 1900
     private static let searchTarget = "urn:schemas-upnp-org:device:ZonePlayer:1"
 
     /// All mutable discovery state lives on this queue - including the read source's event
     /// handler - so a rescan tapped mid-scan can't race with the in-flight socket teardown.
-    private let queue = DispatchQueue(label: "com.curtis.sonos-controller.discovery")
+    private let queue = DispatchQueue(label: "com.curtisblackwell.sonos-controller.discovery")
     private var readSource: DispatchSourceRead?
     private var discoveredLocations: Set<URL> = []
     private var isDiscovering = false

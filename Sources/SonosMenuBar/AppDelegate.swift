@@ -2,7 +2,7 @@ import AppKit
 import os.log
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private static let log = Logger(subsystem: "com.curtis.sonos-controller", category: "appdelegate")
+    private static let log = Logger(subsystem: "com.curtisblackwell.sonos-controller", category: "appdelegate")
 
     private let statusMenu = StatusMenuController()
     private let mediaKeyTap = MediaKeyTap()
@@ -58,6 +58,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         topologySubscriber.start()
 
+        mediaKeyTap.onInstallStateChanged = { [weak self] installed in
+            Self.log.notice("media key tap installed=\(installed, privacy: .public)")
+            if installed {
+                self?.stopPermissionPolling()
+            } else {
+                self?.startPermissionPolling()
+            }
+        }
+
         mediaKeyTap.onPlayPause = {
             Self.log.notice("onPlayPause fired, target IP=\(PreferencesStore.activeGroupCoordinatorIP ?? "nil", privacy: .public)")
             guard let ip = PreferencesStore.activeGroupCoordinatorIP else { return }
@@ -106,20 +115,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    /// `AXIsProcessTrusted()` is an IPC round-trip to the accessibility daemon, so it runs
+    /// off the main thread - a main thread parked waiting on tccd stalls the whole UI, and
+    /// this is on a repeating timer.
     private func refreshPermissionState() {
-        let granted = PermissionsManager.accessibilityGranted()
-        Self.log.notice("accessibilityGranted=\(granted, privacy: .public)")
-        statusMenu.update(accessibilityGranted: granted)
-        if granted {
-            let installed = mediaKeyTap.install()
-            Self.log.notice("mediaKeyTap.install() returned \(installed, privacy: .public)")
+        DispatchQueue.global(qos: .utility).async {
+            let granted = PermissionsManager.accessibilityGranted()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                Self.log.notice("accessibilityGranted=\(granted, privacy: .public)")
+                self.statusMenu.update(accessibilityGranted: granted)
+                if granted { self.mediaKeyTap.install() }
+            }
         }
     }
 
+    /// Only runs while the tap is down. Once it is up the tap thread keeps itself alive, so
+    /// there is nothing left to poll for.
     private func startPermissionPolling() {
+        guard permissionPollTimer == nil else { return }
         permissionPollTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             self?.refreshPermissionState()
         }
+    }
+
+    private func stopPermissionPolling() {
+        permissionPollTimer?.invalidate()
+        permissionPollTimer = nil
     }
 
     /// The full SSDP scan: three seconds of multicast plus a description fetch per responder.

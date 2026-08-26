@@ -13,7 +13,7 @@ import os.log
 /// Main thread only. Every callback it takes - from the listener, from GENA, from its timers
 /// - already lands there, so the state below needs no further synchronisation.
 final class TopologySubscriber {
-    private static let log = Logger(subsystem: "com.curtis.sonos-controller", category: "topology-subscriber")
+    private static let log = Logger(subsystem: "com.curtisblackwell.sonos-controller", category: "topology-subscriber")
 
     /// Events arrive in a burst while the household settles - moving one room fires several
     /// - and each carries the full topology, so only the last one is worth acting on.
@@ -139,7 +139,7 @@ final class TopologySubscriber {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
             }
         }
-        monitor.start(queue: DispatchQueue(label: "com.curtis.sonos-controller.path-monitor"))
+        monitor.start(queue: DispatchQueue(label: "com.curtisblackwell.sonos-controller.path-monitor"))
         pathMonitor = monitor
     }
 
