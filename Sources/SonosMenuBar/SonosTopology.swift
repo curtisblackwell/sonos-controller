@@ -43,13 +43,36 @@ enum SonosTopology {
     }
 
     static func parseGroups(from responseData: Data) -> [SonosGroup] {
+        parseGroups(zoneGroupStateXML: extractZoneGroupState(from: responseData))
+    }
+
+    /// The same service pushes the topology to GENA subscribers as an event. The body is a
+    /// UPnP propertyset rather than a SOAP envelope, but the `ZoneGroupState` property it
+    /// carries is the identical document - so only the wrapper differs.
+    static func parseGroups(fromEventBody body: Data) -> [SonosGroup] {
+        parseGroups(zoneGroupStateXML: extractZoneGroupState(from: body))
+    }
+
+    /// Pulls the `ZoneGroupState` element's text out of whatever wrapper it arrived in.
+    /// XMLParser hands text back already unescaped once, which is usually enough.
+    private static func extractZoneGroupState(from data: Data) -> String {
         let extractor = ZoneGroupStateExtractor()
-        let outerParser = XMLParser(data: responseData)
-        outerParser.delegate = extractor
-        guard outerParser.parse(), !extractor.zoneGroupStateXML.isEmpty else { return [] }
+        let parser = XMLParser(data: data)
+        parser.delegate = extractor
+        guard parser.parse() else { return "" }
+        return extractor.zoneGroupStateXML
+    }
+
+    private static func parseGroups(zoneGroupStateXML: String) -> [SonosGroup] {
+        var xml = zoneGroupStateXML
+        guard !xml.isEmpty else { return [] }
+        // Some firmware escapes the property value twice, so the single unescape XMLParser
+        // does leaves entities behind. A document that has been unescaped enough always has
+        // real ZoneGroup tags in it, so their absence is the reliable tell.
+        if !xml.contains("<ZoneGroup") { xml = unescapingXMLEntities(xml) }
 
         let topology = ZoneGroupTopologyParser()
-        guard topology.parse(xmlString: extractor.zoneGroupStateXML) else { return [] }
+        guard topology.parse(xmlString: xml) else { return [] }
 
         return topology.groups.compactMap { group -> SonosGroup? in
             let rooms = group.members.compactMap { member -> SonosRoom? in
@@ -68,6 +91,16 @@ enum SonosTopology {
                 members: [coordinator] + others
             )
         }
+    }
+
+    /// `&amp;` is undone last: doing it first would turn an escaped `&amp;lt;` into a live
+    /// `<` and invent markup that was never in the document.
+    static func unescapingXMLEntities(_ string: String) -> String {
+        var result = string
+        for (entity, character) in [("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&apos;", "'"), ("&amp;", "&")] {
+            result = result.replacingOccurrences(of: entity, with: character)
+        }
+        return result
     }
 
     /// Every controllable room in the household, sorted by name. The editor needs this flat
@@ -115,6 +148,18 @@ private final class ZoneGroupTopologyParser: NSObject, XMLParserDelegate {
     private var currentMembers: [Member] = []
 
     func parse(xmlString: String) -> Bool {
+        if parseDocument(xmlString) { return true }
+        // Some firmware sends <ZoneGroups> and <VanishedDevices> as siblings, which is two
+        // root elements and not a document XMLParser will accept. Only pay for the wrapper
+        // after a real failure, and start from a clean slate - a parse that died partway
+        // through will have left groups behind.
+        groups = []
+        currentMembers = []
+        currentCoordinatorUUID = ""
+        return parseDocument("<SonosZoneGroupState>\(xmlString)</SonosZoneGroupState>")
+    }
+
+    private func parseDocument(_ xmlString: String) -> Bool {
         guard let data = xmlString.data(using: .utf8) else { return false }
         let parser = XMLParser(data: data)
         parser.delegate = self

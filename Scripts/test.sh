@@ -21,4 +21,7 @@ if [ -d "$LIBS" ]; then
     EXTRA_ARGS+=(-Xlinker -rpath -Xlinker "$LIBS")
 fi
 
-exec swift test "${EXTRA_ARGS[@]}" "$@"
+# macOS ships bash 3.2, where expanding an empty array under `set -u` is an unbound
+# variable error - which would break the very case this script is meant to fall through:
+# full Xcode selected, no extra args needed.
+exec swift test "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}" "$@"

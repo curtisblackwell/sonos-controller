@@ -49,6 +49,61 @@ struct TopologyModelTests {
         #expect(!model.isBusy)
     }
 
+    // MARK: - Command planning
+
+    private var living: SonosRoom { room("RINCON_LIVING", "Living Room", "192.168.1.50") }
+    private var kitchen: SonosRoom { room("RINCON_KITCHEN", "Kitchen", "192.168.1.51") }
+    private var office: SonosRoom { room("RINCON_OFFICE", "Office", "192.168.1.52") }
+    private var patio: SonosRoom { room("RINCON_PATIO", "Patio", "192.168.1.53") }
+
+    /// [Living(coord), Kitchen, Office] plus Patio on its own.
+    private var household: [SonosGroup] {
+        [
+            SonosGroup(id: living.uuid, coordinatorIP: living.ipAddress, members: [living, kitchen, office]),
+            SonosGroup(id: patio.uuid, coordinatorIP: patio.ipAddress, members: [patio]),
+        ]
+    }
+
+    @Test func ungroupingAPlainMemberJustLeaves() {
+        let commands = TopologyModel.commands(moving: kitchen, to: .standalone, in: household)
+        #expect(commands == [.makeStandalone(room: kitchen)])
+    }
+
+    @Test func ungroupingACoordinatorHandsTheGroupOffInstead() {
+        // BecomeCoordinatorOfStandaloneGroup does nothing to a player that already
+        // coordinates its group, so the only way out is to delegate the group away.
+        let commands = TopologyModel.commands(moving: living, to: .standalone, in: household)
+        #expect(commands == [.handOffCoordination(room: living, successorUUID: kitchen.uuid)])
+    }
+
+    @Test func movingACoordinatorIntoAnotherGroupHandsOffFirst() {
+        // Sending x-rincon: straight to a coordinator drags its whole group along; the
+        // handoff is what lets it travel alone.
+        let commands = TopologyModel.commands(moving: living, to: .group(coordinatorUUID: patio.uuid), in: household)
+        #expect(commands == [
+            .handOffCoordination(room: living, successorUUID: kitchen.uuid),
+            .join(room: living, coordinatorUUID: patio.uuid),
+        ])
+    }
+
+    @Test func movingAPlainMemberIntoAnotherGroupIsASingleJoin() {
+        let commands = TopologyModel.commands(moving: office, to: .group(coordinatorUUID: patio.uuid), in: household)
+        #expect(commands == [.join(room: office, coordinatorUUID: patio.uuid)])
+    }
+
+    @Test func aStandaloneRoomJoiningAGroupNeedsNoHandoff() {
+        // It coordinates its own group of one, but there is no group left behind to hand on.
+        let commands = TopologyModel.commands(moving: patio, to: .group(coordinatorUUID: living.uuid), in: household)
+        #expect(commands == [.join(room: patio, coordinatorUUID: living.uuid)])
+    }
+
+    @Test func noOpMovesPlanNothing() {
+        #expect(TopologyModel.commands(moving: patio, to: .standalone, in: household).isEmpty)
+        #expect(TopologyModel.commands(moving: kitchen, to: .group(coordinatorUUID: living.uuid), in: household).isEmpty)
+        #expect(TopologyModel.commands(moving: living, to: .group(coordinatorUUID: living.uuid), in: household).isEmpty)
+        #expect(TopologyModel.commands(moving: room("RINCON_GHOST", "Ghost"), to: .standalone, in: household).isEmpty)
+    }
+
     @Test func groupLookupMatchesOnUUIDNotWholeRoom() {
         let living = room("RINCON_LIVING", "Living Room")
         let group = SonosGroup(id: living.uuid, coordinatorIP: living.ipAddress, members: [living])

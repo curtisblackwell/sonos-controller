@@ -46,6 +46,10 @@ struct GroupingView: View {
                 standaloneSection
             }
             .listStyle(.sidebar)
+            // The model refuses moves while one is in flight, since it would be deciding
+            // against a topology that hasn't caught up yet. Disabling says so instead of
+            // letting drops land on nothing.
+            .disabled(model.isBusy)
         }
     }
 
