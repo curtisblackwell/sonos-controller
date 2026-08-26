@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Network
 import os.log
 
 /// Keeps a live GENA subscription to ZoneGroupTopology so that regrouping done anywhere else
@@ -23,6 +24,12 @@ final class TopologySubscriber {
 
     /// Called on the main thread with a fresh topology.
     var onTopology: (([SonosGroup]) -> Void)?
+    /// Whether events are actually flowing, on every change. The window shows this: a stale
+    /// topology that looks live is worse than one that admits it.
+    var onLiveChanged: ((Bool) -> Void)?
+    /// Asked for when no address we know still answers - the speakers have moved, so only a
+    /// scan can find them again.
+    var onNeedsRescan: (() -> Void)?
 
     private let listener = GENAEventListener()
     private var candidateIPs: [String] = []
@@ -40,19 +47,26 @@ final class TopologySubscriber {
     private var coalesceTimer: Timer?
     private var pendingGroups: [SonosGroup]?
     private var wakeObserver: NSObjectProtocol?
+    private var pathMonitor: NWPathMonitor?
+    private var pathChangeDebounce: DispatchWorkItem?
+    /// Which interfaces were up last time we looked. NWPathMonitor reports the current path
+    /// as soon as it starts and repeats itself on changes we don't care about, and treating
+    /// either as "the network moved" would tear down a healthy subscription.
+    private var lastPathSignature: String?
+    private var listenerRestartTimer: Timer?
+
+    /// True while a subscription is held. Everything that clears `sid` goes through
+    /// `setSID`, so the window can't be told we're live when we aren't.
+    private(set) var isLive = false
 
     func start() {
         listener.onEvent = { [weak self] sid, sourceIP, body in
             self?.handleEvent(sid: sid, sourceIP: sourceIP, body: body)
         }
-        listener.start { [weak self] port in
-            guard let self else { return }
-            guard port != nil else {
-                Self.log.error("No event listener, live topology updates are off")
-                return
-            }
-            self.subscribeToFirstReachable()
+        listener.onFailure = { [weak self] in
+            self?.restartListener()
         }
+        startListener()
         // A subscription doesn't survive sleep: the lease expires while we're down, and the
         // address in the callback URL may not even be ours any more when we come back.
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -66,6 +80,67 @@ final class TopologySubscriber {
             self.dropSubscription()
             self.subscribeToFirstReachable()
         }
+        startPathMonitoring()
+    }
+
+    private func startListener() {
+        listener.start { [weak self] port in
+            guard let self else { return }
+            guard port != nil else {
+                // Without somewhere to receive callbacks there is nothing to subscribe with,
+                // so keep trying rather than sit dark until the app is relaunched.
+                Self.log.error("No event listener, live topology updates are off")
+                self.scheduleListenerRestart()
+                return
+            }
+            self.subscribeToFirstReachable()
+        }
+    }
+
+    /// The port is gone and every subscription pointing at it is undeliverable, so the
+    /// subscriptions have to be rebuilt along with the listener.
+    private func restartListener() {
+        Self.log.notice("Rebuilding the event listener")
+        dropSubscription()
+        listener.stop()
+        scheduleListenerRestart()
+    }
+
+    private func scheduleListenerRestart() {
+        listenerRestartTimer?.invalidate()
+        listenerRestartTimer = Timer.scheduledTimer(withTimeInterval: Self.retryDelay, repeats: false) { [weak self] _ in
+            self?.startListener()
+        }
+    }
+
+    /// A new interface, or an old one going away, changes which address the speakers can
+    /// reach us at - and the callback URL we handed them still names the old one. Nothing
+    /// fails visibly; the events just stop. Paths flap during a switch, so settle first.
+    private func startPathMonitoring() {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard path.status == .satisfied else { return }
+            let signature = path.availableInterfaces.map(\.name).joined(separator: ",")
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let previous = self.lastPathSignature
+                self.lastPathSignature = signature
+                // The first report is just "here is the network", not a change to react to.
+                guard let previous, previous != signature else { return }
+
+                self.pathChangeDebounce?.cancel()
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self else { return }
+                    Self.log.notice("Network path changed, resubscribing")
+                    self.dropSubscription()
+                    self.subscribeToFirstReachable()
+                }
+                self.pathChangeDebounce = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "com.curtis.sonos-controller.path-monitor"))
+        pathMonitor = monitor
     }
 
     /// Fed from discovery. Re-subscribes only when the speaker we're subscribed to has
@@ -76,6 +151,7 @@ final class TopologySubscriber {
         // that has gone away. Tearing down a working subscription over it loses live updates
         // until someone thinks to hit Rescan.
         guard !candidateIPs.isEmpty else { return }
+        let isSameList = candidateIPs == self.candidateIPs
         self.candidateIPs = candidateIPs
 
         // Let the in-flight attempt land first; it re-checks the list against what it bound.
@@ -84,6 +160,10 @@ final class TopologySubscriber {
             return
         }
         if sid != nil, let subscribedIP, candidateIPs.contains(subscribedIP) { return }
+        // Exhausting the list asks for a rescan, and the rescan lands back here. If it turned
+        // up the same speakers that just refused us, restarting would cancel the backoff
+        // timer and go straight round again - a scan every few seconds, forever.
+        if isSameList, retryTimer != nil { return }
         dropSubscription()
         subscribeToFirstReachable()
     }
@@ -95,6 +175,12 @@ final class TopologySubscriber {
         }
         coalesceTimer?.invalidate()
         coalesceTimer = nil
+        listenerRestartTimer?.invalidate()
+        listenerRestartTimer = nil
+        pathChangeDebounce?.cancel()
+        pathChangeDebounce = nil
+        pathMonitor?.cancel()
+        pathMonitor = nil
         dropSubscription()
         listener.stop()
     }
@@ -117,7 +203,11 @@ final class TopologySubscriber {
 
         guard index < candidates.count else {
             guard !candidates.isEmpty else { return }
-            Self.log.notice("No speaker accepted a topology subscription, retrying in \(Int(Self.retryDelay), privacy: .public)s")
+            // Every address we had refused or didn't answer. Most often that means they are
+            // no longer the addresses - a new network, or DHCP moved everyone - so a scan is
+            // the thing most likely to help, with the timer as a backstop if it doesn't.
+            Self.log.notice("No speaker accepted a topology subscription, rescanning; retry in \(Int(Self.retryDelay), privacy: .public)s")
+            onNeedsRescan?()
             retryTimer = Timer.scheduledTimer(withTimeInterval: Self.retryDelay, repeats: false) { [weak self] _ in
                 self?.subscribeToFirstReachable()
             }
@@ -135,11 +225,28 @@ final class TopologySubscriber {
         GENA.subscribe(eventURL: eventURL, callbackURL: callbackURL) { [weak self] result in
             guard let self else { return }
             self.isSubscribing = false
+
+            // Anything that gave up on this attempt while it was in the air - a rebuilt
+            // listener, a network change, waking up - cleared `pendingIP`. Binding the
+            // response now would point the SID at a callback port or local address that no
+            // longer exists, and nothing afterwards would notice: `renew` would keep the
+            // dead subscription alive and the window would call it connected.
+            guard self.pendingIP == ip else {
+                if case let .success(lease) = result {
+                    // Orphan lease: tell the speaker to stop sending to a port we abandoned.
+                    GENA.unsubscribe(eventURL: eventURL, sid: lease.sid)
+                }
+                // Whoever abandoned it wanted a subscription, just not this one - and their
+                // own attempt was blocked by `isSubscribing`.
+                if self.sid == nil { self.subscribeToFirstReachable() }
+                return
+            }
             self.pendingIP = nil
+
             switch result {
             case let .success(lease):
                 Self.log.notice("Subscribed to \(ip, privacy: .public) topology, lease \(Int(lease.timeout), privacy: .public)s")
-                self.sid = lease.sid
+                self.setSID(lease.sid)
                 self.subscribedIP = ip
                 self.scheduleRenew(after: lease.timeout)
                 // The list may have been replaced while this was in the air. Only start over
@@ -175,9 +282,12 @@ final class TopologySubscriber {
         guard let sid, let ip = subscribedIP, let eventURL = Self.eventURL(ip: ip) else { return }
         GENA.renew(eventURL: eventURL, sid: sid) { [weak self] result in
             guard let self else { return }
+            // The subscription may have been torn down and replaced while this was in the
+            // air; a late renewal must not resurrect the one it was renewing.
+            guard self.sid == sid, self.subscribedIP == ip else { return }
             switch result {
             case let .success(lease):
-                self.sid = lease.sid
+                self.setSID(lease.sid)
                 self.scheduleRenew(after: lease.timeout)
             case let .failure(error):
                 // The speaker rebooted, or the lease lapsed. The SID is worthless either
@@ -185,7 +295,7 @@ final class TopologySubscriber {
                 Self.log.notice("Renewal for \(ip, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
                 self.renewTimer?.invalidate()
                 self.renewTimer = nil
-                self.sid = nil
+                self.setSID(nil)
                 self.subscribedIP = nil
                 self.subscribeToFirstReachable()
             }
@@ -200,9 +310,17 @@ final class TopologySubscriber {
         if let sid, let ip = subscribedIP, let eventURL = Self.eventURL(ip: ip) {
             GENA.unsubscribe(eventURL: eventURL, sid: sid)
         }
-        sid = nil
+        setSID(nil)
         subscribedIP = nil
         pendingIP = nil
+    }
+
+    private func setSID(_ newValue: String?) {
+        sid = newValue
+        let live = newValue != nil
+        guard live != isLive else { return }
+        isLive = live
+        onLiveChanged?(live)
     }
 
     // MARK: - Events
@@ -222,11 +340,12 @@ final class TopologySubscriber {
             return
         }
 
+        // A ZoneGroupTopology subscription also delivers software-update and media-server
+        // properties, which parse to nothing. Those - and anything we can't read - must not
+        // be allowed to blank out a topology we already have.
         let groups = SonosTopology.parseGroups(fromEventBody: body)
-        Self.log.notice("Topology event carrying \(groups.count, privacy: .public) groups")
-        // An event we can't parse, or one for a household with nothing controllable in it,
-        // must not be allowed to blank out a topology we already have.
         guard !groups.isEmpty else { return }
+        Self.log.notice("Topology event carrying \(groups.count, privacy: .public) groups")
 
         pendingGroups = groups
         guard coalesceTimer == nil else { return }

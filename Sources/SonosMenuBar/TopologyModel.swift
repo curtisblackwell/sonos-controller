@@ -23,6 +23,9 @@ final class TopologyModel: ObservableObject {
     @Published var errorMessage: String?
     /// The group the media keys drive. Mirrored into `PreferencesStore`.
     @Published private(set) var activeGroupID: String?
+    /// Whether the household is pushing changes to us. Shown in the editor, because a
+    /// topology that has quietly stopped updating looks exactly like one that is correct.
+    @Published private(set) var isReceivingLiveUpdates = false
 
     /// Set by the app delegate to trigger a topology refetch.
     var refreshHandler: (() -> Void)?
@@ -57,6 +60,10 @@ final class TopologyModel: ObservableObject {
         guard resolved != activeGroupID else { return }
         activeGroupID = resolved
         onActiveGroupChanged?()
+    }
+
+    func update(isReceivingLiveUpdates: Bool) {
+        self.isReceivingLiveUpdates = isReceivingLiveUpdates
     }
 
     var allRooms: [SonosRoom] { SonosTopology.allRooms(in: groups) }

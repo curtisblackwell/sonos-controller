@@ -7,9 +7,16 @@ import os.log
 enum GENA {
     private static let log = Logger(subsystem: "com.curtis.sonos-controller", category: "gena")
 
-    /// How long to ask a speaker to hold the subscription for. Sonos honours this and
-    /// answers with what it actually granted, which is what we renew against.
-    static let requestedTimeout = 1800
+    /// How long to ask a speaker to hold the subscription for.
+    ///
+    /// Renewal is the only thing that ever notices a subscription has died - a speaker that
+    /// rebooted and forgot us sends nothing, and silence is indistinguishable from a
+    /// household where nobody has touched anything. So the lease doubles as the liveness
+    /// probe, and a short one is the difference between noticing in minutes and noticing in
+    /// a quarter of an hour. One small request every couple of minutes is a fair price.
+    ///
+    /// Sonos answers with what it actually granted, which is what we renew against.
+    static let requestedTimeout = 300
 
     /// A live subscription: the speaker's handle for it, and how long it lasts unrenewed.
     struct Lease {

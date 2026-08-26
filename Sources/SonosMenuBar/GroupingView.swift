@@ -36,7 +36,7 @@ struct GroupingView: View {
             } description: {
                 Text("Make sure your Sonos speakers are on the same network, then refresh.")
             } actions: {
-                Button("Refresh") { model.refresh() }
+                Button("Look Again") { model.refresh() }
             }
         } else {
             List {
@@ -197,11 +197,28 @@ struct GroupingView: View {
                 Text("Updating…").foregroundStyle(.secondary).font(.callout)
             }
             Spacer()
-            Button("Refresh") { model.refresh() }
-                .disabled(model.isBusy)
+            liveIndicator
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// Replaces what used to be a Refresh button. The household pushes its changes now, and
+    /// the subscription repairs itself, so there is nothing left for the user to trigger -
+    /// what they actually need to know is whether what they're looking at is current.
+    @ViewBuilder
+    private var liveIndicator: some View {
+        if model.isReceivingLiveUpdates {
+            Label("Connected to Sonos", systemImage: "dot.radiowaves.left.and.right")
+                .foregroundStyle(.secondary)
+                .font(.callout)
+                .help("Changes made in the Sonos app show up here automatically.")
+        } else {
+            Label("Reconnecting…", systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+                .font(.callout)
+                .help("Not receiving updates from your speakers. Trying to reconnect.")
+        }
     }
 }
 

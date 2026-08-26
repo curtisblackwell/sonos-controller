@@ -48,6 +48,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         topologySubscriber.onTopology = { [weak self] groups in
             self?.apply(groups: groups)
         }
+        topologySubscriber.onLiveChanged = { [weak self] isLive in
+            self?.topology.update(isReceivingLiveUpdates: isLive)
+        }
+        // The subscriber only knows addresses, so when none of them answer any more it has
+        // to ask for the scan that finds the new ones.
+        topologySubscriber.onNeedsRescan = { [weak self] in
+            self?.runDiscovery()
+        }
         topologySubscriber.start()
 
         mediaKeyTap.onPlayPause = {
@@ -128,7 +136,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Also the subscriber's failover list: the speaker it is subscribed to may have
             // dropped off the network since the last scan.
             self.topologySubscriber.update(candidateIPs: ips)
-            self.resolveGroups(candidateIPs: ips) { [weak self] in
+            // A scan that found nothing is not a household that has gone away, and rescans
+            // happen on their own now - blanking the window every time one comes up empty
+            // would make it flicker to "No Speakers Found" with nobody having touched it.
+            let candidates = ips.isEmpty ? self.topologyCandidateIPs() : ips
+            self.resolveGroups(candidateIPs: candidates) { [weak self] in
                 // Nothing answered. Distinct from `apply(groups: [])`: an empty fetch is not
                 // evidence the saved group is gone, so the selection stays put.
                 self?.statusMenu.update(groups: [])

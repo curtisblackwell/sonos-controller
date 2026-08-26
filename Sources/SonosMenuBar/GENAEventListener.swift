@@ -21,6 +21,11 @@ final class GENAEventListener {
     /// address it came from, and the body.
     var onEvent: ((_ sid: String, _ sourceIP: String, _ body: Data) -> Void)?
 
+    /// Called on the main thread if the listener dies after having been ready. Every
+    /// subscription pointing at its port is now undeliverable, so the owner has to stand a
+    /// new one up and subscribe again.
+    var onFailure: (() -> Void)?
+
     /// Main thread only, so `callbackURL(reachableFrom:)` can be called straight from the
     /// subscribe path without hopping queues.
     private(set) var port: UInt16?
@@ -83,7 +88,20 @@ final class GENAEventListener {
                 finish(boundPort)
             case let .failed(error):
                 Self.log.error("Event listener failed: \(error.localizedDescription, privacy: .public)")
+                let hadBeenReady = didComplete
                 finish(nil)
+                DispatchQueue.main.async { [weak self] in
+                    // A failed NWListener can't be restarted, and leaving it in `listener`
+                    // makes every later `start` short-circuit on the corpse and report nil
+                    // forever. Identity check so a listener stood up since then survives.
+                    guard let self, self.listener === listener else { return }
+                    self.listener?.cancel()
+                    self.listener = nil
+                    self.port = nil
+                    // Only meaningful once it had been ready: before that, `start`'s own
+                    // completion is what tells the caller it didn't work.
+                    if hadBeenReady { self.onFailure?() }
+                }
             case .cancelled:
                 finish(nil)
             default:
