@@ -5,7 +5,7 @@ import os.log
 /// coordinator that AVTransport commands must target) via the ZoneGroupTopology service.
 /// Any single reachable ZonePlayer can answer this for the whole household.
 enum SonosTopology {
-    private static let log = Logger(subsystem: "com.curtis.sonos-controller", category: "topology")
+    private static let log = Logger(subsystem: "com.curtisblackwell.sonos-controller", category: "topology")
 
     static func controlURL(ip: String) -> URL? {
         URL(string: "http://\(ip):1400/ZoneGroupTopology/Control")

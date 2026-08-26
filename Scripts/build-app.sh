@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="SonosController"
 APP_DIR="$ROOT_DIR/$APP_NAME.app"
-BUNDLE_ID="com.curtis.sonos-controller"
+BUNDLE_ID="com.curtisblackwell.sonos-controller"
 
 cd "$ROOT_DIR"
 swift build -c release

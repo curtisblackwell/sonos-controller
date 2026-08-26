@@ -5,7 +5,7 @@
     <key>CFBundleExecutable</key>
     <string>SonosController</string>
     <key>CFBundleIdentifier</key>
-    <string>com.curtis.sonos-controller</string>
+    <string>com.curtisblackwell.sonos-controller</string>
     <key>CFBundleName</key>
     <string>SonosController</string>
     <key>CFBundlePackageType</key>
@@ -27,7 +27,7 @@
     <array>
         <dict>
             <key>UTTypeIdentifier</key>
-            <string>com.curtis.sonos-controller.room</string>
+            <string>com.curtisblackwell.sonos-controller.room</string>
             <key>UTTypeDescription</key>
             <string>Sonos Room</string>
             <key>UTTypeConformsTo</key>

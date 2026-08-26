@@ -62,7 +62,7 @@ enum SonosControlError: LocalizedError {
 }
 
 enum SonosControl {
-    private static let log = Logger(subsystem: "com.curtis.sonos-controller", category: "control")
+    private static let log = Logger(subsystem: "com.curtisblackwell.sonos-controller", category: "control")
 
     static func soapEnvelope(action: SonosAction) -> String {
         let extra = action.arguments

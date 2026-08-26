@@ -18,7 +18,7 @@ struct SonosRoom: Equatable, Identifiable, Hashable, Codable {
 /// Drag payload for moving a room between groups in the editor. The identifier is declared
 /// in Info.plist under UTExportedTypeDeclarations; it is app-internal and has no file form.
 extension UTType {
-    static let sonosRoom = UTType(exportedAs: "com.curtis.sonos-controller.room")
+    static let sonosRoom = UTType(exportedAs: "com.curtisblackwell.sonos-controller.room")
 }
 
 extension SonosRoom: Transferable {
