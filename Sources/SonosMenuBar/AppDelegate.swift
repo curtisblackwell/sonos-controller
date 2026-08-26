@@ -9,11 +9,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let discovery = SonosDiscovery()
     private let topology = TopologyModel()
     private let topologySubscriber = TopologySubscriber()
+    private let volume = VolumeModel()
     private var permissionPollTimer: Timer?
     /// Every player the last scan found, so a refresh has somewhere to ask without running
     /// another one.
     private var knownDeviceIPs: [String] = []
-    private lazy var groupingWindow = GroupingWindowController(model: topology)
+    private lazy var groupingWindow = GroupingWindowController(model: topology, volume: volume)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Before anything reads the saved group - the bundle ID rename moved us to a new
@@ -33,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         topology.onActiveGroupChanged = { [weak self] in
             self?.statusMenu.refreshActiveGroupMarks()
+            self?.refreshVolumeKeyAvailability()
         }
         statusMenu.onRescanTapped = { [weak self] in
             self?.runDiscovery()
@@ -91,7 +93,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             SonosControl.send(action: .previous, to: ip)
         }
 
+        // Shift-volume drives the whole active group. It goes through the same model as the
+        // group slider so both scale the members the same way - `GroupRenderingControl`
+        // would be one round trip instead of one per member, but it re-imposes a stale
+        // balance of its own; see `VolumeModel`.
+        mediaKeyTap.onVolumeUp = { [weak self] in
+            self?.adjustActiveGroupVolume(by: VolumeControl.keyStep)
+        }
+        mediaKeyTap.onVolumeDown = { [weak self] in
+            self?.adjustActiveGroupVolume(by: -VolumeControl.keyStep)
+        }
+        mediaKeyTap.onToggleMute = { [weak self] in
+            guard let ip = PreferencesStore.activeGroupCoordinatorIP else { return }
+            VolumeControl.toggleGroupMute(coordinatorIP: ip) { [weak self] _ in
+                self?.volume.refreshSoon()
+            }
+        }
+
         NSApp.mainMenu = MainMenu.build(appName: "SonosController")
+
+        refreshVolumeKeyAvailability()
 
         PermissionsManager.requestAccessibility()
         refreshPermissionState()
@@ -237,5 +258,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         statusMenu.update(groups: groups)
         topology.update(groups: groups)
+        volume.update(groups: groups)
+        refreshVolumeKeyAvailability()
+    }
+
+    private func adjustActiveGroupVolume(by adjustment: Int) {
+        guard let group = activeGroup() else { return }
+        Self.log.notice("volume key: \(adjustment, privacy: .public) on \(group.displayName, privacy: .public)")
+        volume.nudgeVolume(forGroup: group, by: adjustment)
+    }
+
+    /// The saved selection as a live group. `apply(groups:)` clears a selection that has
+    /// left the topology, so a saved id that resolves to nothing means the household hasn't
+    /// been read yet - there is nothing to scale against, and doing nothing beats moving one
+    /// speaker of several.
+    private func activeGroup() -> SonosGroup? {
+        guard let id = PreferencesStore.activeGroupID else { return nil }
+        return topology.groups.first { $0.id == id }
+    }
+
+    /// The tap swallows Shift-volume only when there is somewhere to send it - otherwise it
+    /// would take the machine's own volume keys away and do nothing with them.
+    ///
+    /// Resolved against the topology rather than the saved IP, because that is what
+    /// `adjustActiveGroupVolume` needs: for the seconds between launch and the first
+    /// topology, a saved selection is a target we can't scale yet, and the keys are better
+    /// left to the machine than swallowed for nothing.
+    private func refreshVolumeKeyAvailability() {
+        mediaKeyTap.hasVolumeTarget = activeGroup() != nil
     }
 }
