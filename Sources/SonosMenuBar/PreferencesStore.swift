@@ -5,6 +5,28 @@ enum PreferencesStore {
     private static let nameKey = "activeGroupDisplayName"
     private static let ipKey = "activeGroupCoordinatorIP"
 
+    /// The bundle identifier before it was corrected to `com.curtisblackwell.*`. Renaming it
+    /// moved the app to a fresh `UserDefaults` domain, so anyone who ran a build from before
+    /// the rename has their saved group sitting in the old one.
+    private static let legacyDomain = "com.curtis.sonos-controller"
+    private static let migrationKey = "didMigrateLegacyDefaults"
+
+    /// Copies the saved group over from the pre-rename domain, once. Runs before anything
+    /// reads a preference; a no-op for a fresh install, and never overwrites a value that
+    /// already exists in the current domain.
+    static func migrateLegacyDefaultsIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: migrationKey) else { return }
+        defaults.set(true, forKey: migrationKey)
+
+        guard let legacy = UserDefaults(suiteName: legacyDomain) else { return }
+        for key in [idKey, nameKey, ipKey] {
+            guard defaults.string(forKey: key) == nil,
+                  let value = legacy.string(forKey: key) else { continue }
+            defaults.set(value, forKey: key)
+        }
+    }
+
     static var activeGroupID: String? {
         get { UserDefaults.standard.string(forKey: idKey) }
         set { UserDefaults.standard.set(newValue, forKey: idKey) }

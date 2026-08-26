@@ -16,6 +16,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var groupingWindow = GroupingWindowController(model: topology)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Before anything reads the saved group - the bundle ID rename moved us to a new
+        // UserDefaults domain and left the old selection behind.
+        PreferencesStore.migrateLegacyDefaultsIfNeeded()
+
         statusMenu.onGrantAccessTapped = {
             PermissionsManager.requestAccessibility()
             PermissionsManager.openAccessibilitySettings()
@@ -61,10 +65,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mediaKeyTap.onInstallStateChanged = { [weak self] installed in
             Self.log.notice("media key tap installed=\(installed, privacy: .public)")
             if installed {
+                self?.statusMenu.updateNeedsRelaunch(false)
                 self?.stopPermissionPolling()
             } else {
                 self?.startPermissionPolling()
             }
+        }
+        mediaKeyTap.onNeedsRelaunch = { [weak self] in
+            self?.statusMenu.updateNeedsRelaunch(true)
         }
 
         mediaKeyTap.onPlayPause = {

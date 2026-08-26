@@ -38,14 +38,33 @@ final class MediaKeyTap {
     /// and restart its permission polling.
     var onInstallStateChanged: ((Bool) -> Void)?
 
+    /// Called on the main thread once the tap has failed to come up enough times that the
+    /// grant is clearly not going to take effect in this process. Fires once per run of
+    /// failures, so it is safe to show something to the user from it.
+    var onNeedsRelaunch: (() -> Void)?
+
     /// Owned by the tap thread once it is running.
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var tapRunLoop: CFRunLoop?
 
-    /// `started` is the one piece of state the main thread touches, so it takes the lock.
+    /// Everything the main thread touches goes through this lock.
     private let lock = NSLock()
     private var started = false
+    /// Consecutive times the tap came up empty. `AXIsProcessTrusted()` can report the grant
+    /// while `tapCreate` still refuses - a grant made while the app was already running
+    /// usually needs a relaunch - and the permission poll would otherwise spin up and tear
+    /// down a thread every two seconds forever.
+    private var failedAttempts = 0
+    /// Uptime (not wall clock, which a clock change could move backwards) before which
+    /// `install()` declines to try again.
+    private var retryNotBefore: TimeInterval = 0
+
+    /// Failures before we stop treating it as "not granted yet" and tell the user.
+    private static let failuresBeforeGivingUp = 3
+    /// 2s, 4s, 8s… capped. The permission poll runs every 2s, so without this every tick
+    /// spawns a thread.
+    private static let maxRetryBackoff: TimeInterval = 30
 
     var isInstalled: Bool {
         lock.lock()
@@ -57,7 +76,7 @@ final class MediaKeyTap {
     /// waits on `CGEvent.tapCreate`, and the result arrives via `onInstallStateChanged`.
     func install() {
         lock.lock()
-        if started {
+        guard !started, ProcessInfo.processInfo.systemUptime >= retryNotBefore else {
             lock.unlock()
             return
         }
@@ -77,21 +96,38 @@ final class MediaKeyTap {
 
         guard createTap() else {
             Self.log.notice("CGEvent.tapCreate failed - Accessibility permission likely not granted yet")
-            finishTapThread()
+            finishTapThread(didInstall: false)
             return
         }
         Self.log.notice("Media key tap installed")
+        lock.lock()
+        failedAttempts = 0
+        retryNotBefore = 0
+        lock.unlock()
         notifyInstallState(true)
 
         // Parks this thread servicing the tap and nothing else. The timeout is just a
         // heartbeat for `revalidate()`; it isn't a poll of anything expensive.
+        //
+        // The pool is this thread's own - `NSEvent(cgEvent:)` autoreleases once per
+        // system-defined event machine-wide, and on the main run loop AppKit drained those
+        // for us. Nothing drains a bare `CFRunLoopRunInMode`, so without this they pile up
+        // for as long as the app runs.
         while !Thread.current.isCancelled {
-            let result = CFRunLoopRunInMode(.defaultMode, Self.revalidateInterval, false)
-            if result == .stopped || result == .finished { break }
-            revalidate()
+            let stop = autoreleasepool { () -> Bool in
+                let result = CFRunLoopRunInMode(.defaultMode, Self.revalidateInterval, false)
+                if result == .stopped || result == .finished { return true }
+                // A rebuild that failed leaves no tap to service, so end the thread and let
+                // `onInstallStateChanged(false)` restart the permission polling that will
+                // call `install()` again. Relying on the run loop to report `.finished`
+                // because the mode went empty would silently stop working the moment
+                // anything else is scheduled on this thread.
+                return !revalidate()
+            }
+            if stop { break }
         }
 
-        finishTapThread()
+        finishTapThread(didInstall: true)
     }
 
     /// Must be called on the tap thread.
@@ -127,30 +163,50 @@ final class MediaKeyTap {
     }
 
     /// macOS disables a tap that answered too slowly and invalidates it outright when
-    /// Accessibility is revoked - and revives neither on its own. Must be called on the
-    /// tap thread.
-    private func revalidate() {
-        guard let tap = eventTap else { return }
+    /// Accessibility is revoked - and revives neither on its own. Returns false when there
+    /// is no longer a live tap to service. Must be called on the tap thread.
+    @discardableResult
+    private func revalidate() -> Bool {
+        guard let tap = eventTap else { return false }
         if CFMachPortIsValid(tap) {
             if !CGEvent.tapIsEnabled(tap: tap) {
                 Self.log.notice("Media key tap was disabled, re-enabling")
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
-            return
+            return true
         }
         Self.log.notice("Media key tap is dead, rebuilding")
         teardown()
-        if !createTap() {
-            Self.log.notice("Rebuild failed - Accessibility permission is probably gone")
-        }
+        if createTap() { return true }
+        Self.log.notice("Rebuild failed - Accessibility permission is probably gone")
+        return false
     }
 
-    /// Must be called on the tap thread.
-    private func finishTapThread() {
+    /// Must be called on the tap thread. `didInstall` separates "the tap ran and then went
+    /// away" from "it never came up at all" - only the latter backs off, since a tap that
+    /// worked once should be retried immediately.
+    private func finishTapThread(didInstall: Bool) {
         teardown()
+
         lock.lock()
         started = false
+        var giveUp = false
+        if didInstall {
+            failedAttempts = 0
+            retryNotBefore = 0
+        } else {
+            failedAttempts += 1
+            let backoff = min(Self.maxRetryBackoff, pow(2, Double(failedAttempts)))
+            retryNotBefore = ProcessInfo.processInfo.systemUptime + backoff
+            giveUp = failedAttempts == Self.failuresBeforeGivingUp
+        }
+        let attempts = failedAttempts
         lock.unlock()
+
+        if giveUp {
+            Self.log.error("Media key tap failed \(attempts, privacy: .public) times with Accessibility reported as granted - the app probably needs a relaunch")
+            DispatchQueue.main.async { [weak self] in self?.onNeedsRelaunch?() }
+        }
         notifyInstallState(false)
     }
 
@@ -187,31 +243,39 @@ final class MediaKeyTap {
 
         // The event is owned by the caller, so it goes back unretained - returning it
         // retained leaks a CGEvent for every system-defined event on the machine.
-        guard type.rawValue == systemDefinedEventType,
-              let nsEvent = NSEvent(cgEvent: cgEvent),
-              nsEvent.subtype.rawValue == mediaKeySubtype else {
+        guard type.rawValue == systemDefinedEventType else {
             return Unmanaged.passUnretained(cgEvent)
         }
 
-        let data1 = UInt32(truncatingIfNeeded: nsEvent.data1)
-        let keyCode = Int32((data1 & 0xFFFF0000) >> 16)
-        let isKeyDown = Int32((data1 & 0xFF00) >> 8) == NX_KEYSTATE_DOWN
+        // `NSEvent(cgEvent:)` autoreleases, and this runs for every system-defined event on
+        // the machine, so it gets its own pool rather than waiting for the run loop to come
+        // back around. `cgEvent` is the caller's and is untouched by the drain.
+        let pressed: (handler: (() -> Void)?, isKeyDown: Bool, keyCode: Int32)? = autoreleasepool {
+            guard let nsEvent = NSEvent(cgEvent: cgEvent),
+                  nsEvent.subtype.rawValue == mediaKeySubtype else { return nil }
 
-        let handler: (() -> Void)?
-        switch keyCode {
-        case NX_KEYTYPE_PLAY:
-            handler = onPlayPause
-        case NX_KEYTYPE_NEXT, NX_KEYTYPE_FAST:
-            handler = onNext
-        case NX_KEYTYPE_PREVIOUS, NX_KEYTYPE_REWIND:
-            handler = onPrevious
-        default:
-            return Unmanaged.passUnretained(cgEvent)
+            let data1 = UInt32(truncatingIfNeeded: nsEvent.data1)
+            let keyCode = Int32((data1 & 0xFFFF0000) >> 16)
+            let isKeyDown = Int32((data1 & 0xFF00) >> 8) == NX_KEYSTATE_DOWN
+
+            switch keyCode {
+            case NX_KEYTYPE_PLAY:
+                return (onPlayPause, isKeyDown, keyCode)
+            case NX_KEYTYPE_NEXT, NX_KEYTYPE_FAST:
+                return (onNext, isKeyDown, keyCode)
+            case NX_KEYTYPE_PREVIOUS, NX_KEYTYPE_REWIND:
+                return (onPrevious, isKeyDown, keyCode)
+            default:
+                return nil
+            }
         }
+
+        guard let pressed else { return Unmanaged.passUnretained(cgEvent) }
 
         // Both the down and the up are swallowed, so nothing else on the system sees the
         // key - but only the down does anything.
-        if isKeyDown, let handler {
+        if pressed.isKeyDown, let handler = pressed.handler {
+            let keyCode = pressed.keyCode
             DispatchQueue.main.async {
                 Self.log.notice("media key: code=\(keyCode, privacy: .public)")
                 handler()

@@ -4,6 +4,9 @@ final class StatusMenuController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private var groups: [SonosGroup] = []
     private var accessibilityGranted = false
+    /// Accessibility reads as granted but the tap still won't start - almost always a grant
+    /// made while this process was already running.
+    private var needsRelaunch = false
 
     var onGrantAccessTapped: (() -> Void)?
     var onOpenLocalNetworkSettingsTapped: (() -> Void)?
@@ -31,6 +34,13 @@ final class StatusMenuController: NSObject {
 
     func update(accessibilityGranted: Bool) {
         self.accessibilityGranted = accessibilityGranted
+        if !accessibilityGranted { needsRelaunch = false }
+        rebuildMenu()
+    }
+
+    func updateNeedsRelaunch(_ needsRelaunch: Bool) {
+        guard self.needsRelaunch != needsRelaunch else { return }
+        self.needsRelaunch = needsRelaunch
         rebuildMenu()
     }
 
@@ -40,6 +50,13 @@ final class StatusMenuController: NSObject {
         if !accessibilityGranted {
             let item = NSMenuItem(title: "Grant Accessibility Access…", action: #selector(grantAccess), keyEquivalent: "")
             item.target = self
+            menu.addItem(item)
+            menu.addItem(.separator())
+        } else if needsRelaunch {
+            // Nothing here can fix it - the grant only takes effect in a fresh process - so
+            // this says so rather than offering a button that would do nothing.
+            let item = NSMenuItem(title: "Media Keys Need a Relaunch", action: nil, keyEquivalent: "")
+            item.isEnabled = false
             menu.addItem(item)
             menu.addItem(.separator())
         }
