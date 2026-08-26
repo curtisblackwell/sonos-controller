@@ -10,6 +10,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let topology = TopologyModel()
     private let topologySubscriber = TopologySubscriber()
     private var permissionPollTimer: Timer?
+    /// Every player the last scan found, so a refresh has somewhere to ask without running
+    /// another one.
+    private var knownDeviceIPs: [String] = []
     private lazy var groupingWindow = GroupingWindowController(model: topology)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -34,9 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.groupingWindow.present()
         }
 
-        // The editor's Refresh button and its post-grouping settle both re-run discovery.
+        // The editor's Refresh button and its post-grouping settle both re-read the topology
+        // from a known player rather than rescanning for one.
         topology.refreshHandler = { [weak self] in
-            self?.runDiscovery()
+            self?.refreshTopology()
         }
 
         // Regrouping from the Sonos app arrives as a pushed event carrying the whole
@@ -110,30 +114,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The full SSDP scan: three seconds of multicast plus a description fetch per responder.
+    /// Only worth paying when we have no idea where the speakers are - `refreshTopology` is
+    /// the everyday path.
     private func runDiscovery() {
         discovery.discover { [weak self] devices in
             guard let self else { return }
             let ips = devices.map(\.ipAddress)
+            self.knownDeviceIPs = ips
             // Also the subscriber's failover list: the speaker it is subscribed to may have
             // dropped off the network since the last scan.
             self.topologySubscriber.update(candidateIPs: ips)
-            self.resolveGroups(candidateIPs: ips)
+            self.resolveGroups(candidateIPs: ips) { [weak self] in
+                // Nothing answered. Distinct from `apply(groups: [])`: an empty fetch is not
+                // evidence the saved group is gone, so the selection stays put.
+                self?.statusMenu.update(groups: [])
+                self?.topology.update(groups: [])
+            }
         }
+    }
+
+    /// Re-reads the topology from a player we already know about - one SOAP round trip, no
+    /// scan. This is what the editor's Refresh button and the settle after a grouping
+    /// command use; making them rediscover the household added three seconds to every drag.
+    private func refreshTopology() {
+        let candidates = topologyCandidateIPs()
+        guard !candidates.isEmpty else {
+            runDiscovery()
+            return
+        }
+        resolveGroups(candidateIPs: candidates) { [weak self] in
+            // Every address we had is stale, so there is nothing left to ask - fall back to
+            // finding the speakers again.
+            Self.log.notice("No known player answered, falling back to a full scan")
+            self?.runDiscovery()
+        }
+    }
+
+    /// Coordinators first: they are the players we most recently saw answering, and the ones
+    /// still holding a group together.
+    private func topologyCandidateIPs() -> [String] {
+        var seen = Set<String>()
+        return (topology.groups.map(\.coordinatorIP) + knownDeviceIPs).filter { seen.insert($0).inserted }
     }
 
     /// GetZoneGroupState can be asked of any single reachable ZonePlayer and returns the
     /// whole household's topology, so we just need one candidate to answer - try each in
-    /// turn in case the first one is unreachable.
-    private func resolveGroups(candidateIPs: [String], index: Int = 0) {
+    /// turn in case the first one is unreachable. `whenNoneAnswer` runs if none of them does.
+    private func resolveGroups(candidateIPs: [String], index: Int = 0, whenNoneAnswer: @escaping () -> Void) {
         guard index < candidateIPs.count else {
-            statusMenu.update(groups: [])
-            topology.update(groups: [])
+            whenNoneAnswer()
             return
         }
         SonosTopology.fetchGroups(from: candidateIPs[index]) { [weak self] groups in
             guard let self else { return }
             guard !groups.isEmpty else {
-                self.resolveGroups(candidateIPs: candidateIPs, index: index + 1)
+                self.resolveGroups(candidateIPs: candidateIPs, index: index + 1, whenNoneAnswer: whenNoneAnswer)
                 return
             }
             self.apply(groups: groups)
