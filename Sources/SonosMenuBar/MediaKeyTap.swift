@@ -1,7 +1,11 @@
 import AppKit
 import CoreGraphics
+import os
 import os.log
 
+private let NX_KEYTYPE_SOUND_UP: Int32 = 0
+private let NX_KEYTYPE_SOUND_DOWN: Int32 = 1
+private let NX_KEYTYPE_MUTE: Int32 = 7
 private let NX_KEYTYPE_PLAY: Int32 = 16
 private let NX_KEYTYPE_NEXT: Int32 = 17
 private let NX_KEYTYPE_PREVIOUS: Int32 = 18
@@ -10,10 +14,43 @@ private let NX_KEYTYPE_PREVIOUS: Int32 = 18
 private let NX_KEYTYPE_FAST: Int32 = 19
 private let NX_KEYTYPE_REWIND: Int32 = 20
 private let NX_KEYSTATE_DOWN: Int32 = 0x0A
+/// Set on the auto-repeats the keyboard sends while a key is held.
+private let NX_KEYREPEAT_MASK: UInt32 = 0x1
 private let mediaKeySubtype: Int16 = 8
 private let systemDefinedEventType: UInt32 = 14
 
-/// Watches for the F7/F8/F9 media keys and swallows them so Apple Music doesn't also react.
+/// What a decoded key press means to this app.
+private enum MediaKeyAction {
+    case playPause
+    case next
+    case previous
+    case volumeUp
+    case volumeDown
+    case toggleMute
+
+    /// Transport keys are ours unconditionally - nothing else on the machine should act on
+    /// F7/F8/F9 while this app is running. The volume keys are the system's by default and
+    /// are only ours when the user asks for them with Shift.
+    var requiresShift: Bool {
+        switch self {
+        case .playPause, .next, .previous: return false
+        case .volumeUp, .volumeDown, .toggleMute: return true
+        }
+    }
+
+    /// Whether the auto-repeats a held key sends should each do the thing again. Holding a
+    /// volume key ramps, which is what the same key does to the machine's own volume.
+    /// Mute is the one key where a repeat would undo the press that started it.
+    var actsOnAutoRepeat: Bool {
+        switch self {
+        case .toggleMute: return false
+        case .volumeUp, .volumeDown, .playPause, .next, .previous: return true
+        }
+    }
+}
+
+/// Watches for the media keys and swallows the ones it acts on, so Apple Music doesn't also
+/// react to F7/F8/F9 and the machine's own speakers don't move on Shift-volume.
 ///
 /// The tap is an *active* `.cgSessionEventTap`: the window server hands each matching event
 /// to this process and holds the session's input stream until the callback answers. That
@@ -33,6 +70,22 @@ final class MediaKeyTap {
     var onPlayPause: (() -> Void)?
     var onNext: (() -> Void)?
     var onPrevious: (() -> Void)?
+    var onVolumeUp: (() -> Void)?
+    var onVolumeDown: (() -> Void)?
+    var onToggleMute: (() -> Void)?
+
+    /// Whether there is a group for a Shift-volume press to go to.
+    ///
+    /// Swallowing the key with nowhere to send it would take the machine's own volume away
+    /// and give nothing back, so the tap has to know - and it has to know on the input path,
+    /// which rules out reading `PreferencesStore` there. Written from the main thread when
+    /// the selection changes; the lock is uncontended in practice and never blocks the
+    /// window server for a measurable time.
+    private let volumeTargetState = OSAllocatedUnfairLock(initialState: false)
+    var hasVolumeTarget: Bool {
+        get { volumeTargetState.withLock { $0 } }
+        set { volumeTargetState.withLock { $0 = newValue } }
+    }
 
     /// Called on the main thread when the tap comes up or goes down, so the app can stop
     /// and restart its permission polling.
@@ -234,7 +287,8 @@ final class MediaKeyTap {
     // MARK: - Event handling
 
     /// Runs inside the system's input path - see the note on the type. Everything here is
-    /// decode-only; no I/O, no locks, no AppKit work beyond reading the event.
+    /// decode-only; no I/O, no locks beyond the one flag read, no AppKit work beyond reading
+    /// the event.
     private func handle(type: CGEventType, cgEvent: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: true) }
@@ -250,37 +304,70 @@ final class MediaKeyTap {
         // `NSEvent(cgEvent:)` autoreleases, and this runs for every system-defined event on
         // the machine, so it gets its own pool rather than waiting for the run loop to come
         // back around. `cgEvent` is the caller's and is untouched by the drain.
-        let pressed: (handler: (() -> Void)?, isKeyDown: Bool, keyCode: Int32)? = autoreleasepool {
+        let press: (action: MediaKeyAction, isKeyDown: Bool, isRepeat: Bool, keyCode: Int32)? = autoreleasepool {
             guard let nsEvent = NSEvent(cgEvent: cgEvent),
                   nsEvent.subtype.rawValue == mediaKeySubtype else { return nil }
 
             let data1 = UInt32(truncatingIfNeeded: nsEvent.data1)
             let keyCode = Int32((data1 & 0xFFFF0000) >> 16)
             let isKeyDown = Int32((data1 & 0xFF00) >> 8) == NX_KEYSTATE_DOWN
+            let isRepeat = (data1 & NX_KEYREPEAT_MASK) != 0
 
+            let action: MediaKeyAction
             switch keyCode {
-            case NX_KEYTYPE_PLAY:
-                return (onPlayPause, isKeyDown, keyCode)
-            case NX_KEYTYPE_NEXT, NX_KEYTYPE_FAST:
-                return (onNext, isKeyDown, keyCode)
-            case NX_KEYTYPE_PREVIOUS, NX_KEYTYPE_REWIND:
-                return (onPrevious, isKeyDown, keyCode)
-            default:
-                return nil
+            case NX_KEYTYPE_PLAY: action = .playPause
+            case NX_KEYTYPE_NEXT, NX_KEYTYPE_FAST: action = .next
+            case NX_KEYTYPE_PREVIOUS, NX_KEYTYPE_REWIND: action = .previous
+            case NX_KEYTYPE_SOUND_UP: action = .volumeUp
+            case NX_KEYTYPE_SOUND_DOWN: action = .volumeDown
+            case NX_KEYTYPE_MUTE: action = .toggleMute
+            default: return nil
+            }
+            return (action, isKeyDown, isRepeat, keyCode)
+        }
+
+        guard let press else { return Unmanaged.passUnretained(cgEvent) }
+
+        if press.action.requiresShift {
+            // Shift and nothing else: Shift-Option-volume opens Sound settings and
+            // Command-volume is the output-device picker, and taking either would replace a
+            // system shortcut with one the user never asked for. A plain press stays the
+            // machine's own volume, and so does one with no group to send it to.
+            guard Self.isShiftOnly(cgEvent.flags), hasVolumeTarget else {
+                return Unmanaged.passUnretained(cgEvent)
             }
         }
 
-        guard let pressed else { return Unmanaged.passUnretained(cgEvent) }
-
         // Both the down and the up are swallowed, so nothing else on the system sees the
         // key - but only the down does anything.
-        if pressed.isKeyDown, let handler = pressed.handler {
-            let keyCode = pressed.keyCode
+        if press.isKeyDown, !press.isRepeat || press.action.actsOnAutoRepeat, let handler = self.handler(for: press.action) {
+            let keyCode = press.keyCode
             DispatchQueue.main.async {
                 Self.log.notice("media key: code=\(keyCode, privacy: .public)")
                 handler()
             }
         }
         return nil
+    }
+
+    /// Read on the tap thread; every one of these is assigned before `install()`.
+    private func handler(for action: MediaKeyAction) -> (() -> Void)? {
+        switch action {
+        case .playPause: return onPlayPause
+        case .next: return onNext
+        case .previous: return onPrevious
+        case .volumeUp: return onVolumeUp
+        case .volumeDown: return onVolumeDown
+        case .toggleMute: return onToggleMute
+        }
+    }
+
+    /// Caps Lock and the numeric-keypad bit ride along on ordinary presses, so only the four
+    /// real modifiers are worth looking at.
+    static func isShiftOnly(_ flags: CGEventFlags) -> Bool {
+        flags.contains(.maskShift)
+            && !flags.contains(.maskCommand)
+            && !flags.contains(.maskAlternate)
+            && !flags.contains(.maskControl)
     }
 }

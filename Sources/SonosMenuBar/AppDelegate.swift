@@ -9,11 +9,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let discovery = SonosDiscovery()
     private let topology = TopologyModel()
     private let topologySubscriber = TopologySubscriber()
+    private let volume = VolumeModel()
     private var permissionPollTimer: Timer?
     /// Every player the last scan found, so a refresh has somewhere to ask without running
     /// another one.
     private var knownDeviceIPs: [String] = []
-    private lazy var groupingWindow = GroupingWindowController(model: topology)
+    private lazy var groupingWindow = GroupingWindowController(model: topology, volume: volume)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Before anything reads the saved group - the bundle ID rename moved us to a new
@@ -33,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         topology.onActiveGroupChanged = { [weak self] in
             self?.statusMenu.refreshActiveGroupMarks()
+            self?.refreshVolumeKeyAvailability()
         }
         statusMenu.onRescanTapped = { [weak self] in
             self?.runDiscovery()
@@ -91,7 +93,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             SonosControl.send(action: .previous, to: ip)
         }
 
+        // Shift-volume drives the whole active group, not its coordinator alone - a relative
+        // group change is one round trip and keeps the members' balance, where writing the
+        // coordinator would leave the rest of the group where it was.
+        mediaKeyTap.onVolumeUp = { [weak self] in
+            self?.adjustActiveGroupVolume(by: VolumeControl.keyStep)
+        }
+        mediaKeyTap.onVolumeDown = { [weak self] in
+            self?.adjustActiveGroupVolume(by: -VolumeControl.keyStep)
+        }
+        mediaKeyTap.onToggleMute = { [weak self] in
+            guard let ip = PreferencesStore.activeGroupCoordinatorIP else { return }
+            VolumeControl.toggleGroupMute(coordinatorIP: ip) { [weak self] _ in
+                self?.volume.refreshSoon()
+            }
+        }
+
         NSApp.mainMenu = MainMenu.build(appName: "SonosController")
+
+        refreshVolumeKeyAvailability()
 
         PermissionsManager.requestAccessibility()
         refreshPermissionState()
@@ -237,5 +257,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         statusMenu.update(groups: groups)
         topology.update(groups: groups)
+        volume.update(groups: groups)
+        refreshVolumeKeyAvailability()
+    }
+
+    private func adjustActiveGroupVolume(by adjustment: Int) {
+        guard let ip = PreferencesStore.activeGroupCoordinatorIP else { return }
+        VolumeControl.adjustGroupVolume(by: adjustment, coordinatorIP: ip) { [weak self] newVolume in
+            Self.log.notice("volume key: \(adjustment, privacy: .public) -> \(newVolume.map(String.init) ?? "unchanged", privacy: .public)")
+            // Only does anything while the window is open; the debounce is what makes it
+            // safe to call from a key that repeats while it is held.
+            self?.volume.refreshSoon()
+        }
+    }
+
+    /// The tap swallows Shift-volume only when there is somewhere to send it - otherwise it
+    /// would take the machine's own volume keys away and do nothing with them.
+    private func refreshVolumeKeyAvailability() {
+        mediaKeyTap.hasVolumeTarget = PreferencesStore.activeGroupCoordinatorIP != nil
     }
 }

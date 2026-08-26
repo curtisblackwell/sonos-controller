@@ -1,11 +1,12 @@
 import SwiftUI
 
 /// The full topology editor: every group in the household as a section, every room as a
-/// draggable row. Drag a room onto another group to join it, or onto "On Their Own" to
-/// ungroup it. Every drag has a menu equivalent on the row, so the editor is fully usable
-/// from the keyboard and with VoiceOver.
+/// draggable row with its own volume slider. Drag a room onto another group to join it, or
+/// onto "On Their Own" to ungroup it. Every drag has a menu equivalent on the row, so the
+/// editor is fully usable from the keyboard and with VoiceOver.
 struct GroupingView: View {
     @ObservedObject var model: TopologyModel
+    @ObservedObject var volume: VolumeModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -13,7 +14,7 @@ struct GroupingView: View {
             Divider()
             footer
         }
-        .frame(minWidth: 380, minHeight: 320)
+        .frame(minWidth: 560, minHeight: 320)
         .alert(
             "Grouping Failed",
             isPresented: Binding(
@@ -46,6 +47,21 @@ struct GroupingView: View {
                 standaloneSection
             }
             .listStyle(.sidebar)
+            // Deliberately on the list rather than alongside the grouping alert on the
+            // outer view: two alerts on one view is one alert, and whichever lost would
+            // never be seen.
+            .alert(
+                "Couldn't Match Volumes",
+                isPresented: Binding(
+                    get: { volume.errorMessage != nil },
+                    set: { if !$0 { volume.errorMessage = nil } }
+                ),
+                presenting: volume.errorMessage
+            ) { _ in
+                Button("OK", role: .cancel) { volume.errorMessage = nil }
+            } message: { message in
+                Text(message)
+            }
             // The model refuses moves while one is in flight, since it would be deciding
             // against a topology that hasn't caught up yet. Disabling says so instead of
             // letting drops land on nothing.
@@ -73,6 +89,7 @@ struct GroupingView: View {
 
     private func groupSection(_ group: SonosGroup) -> some View {
         Section {
+            groupVolumeRow(group)
             ForEach(group.members) { room in
                 roomRow(room, in: group)
             }
@@ -122,22 +139,107 @@ struct GroupingView: View {
     /// its own to hang the star off - without this it would be the one thing in the
     /// household the window couldn't select.
     private func roomRow(_ room: SonosRoom, in group: SonosGroup?, showsActiveToggle: Bool = false) -> some View {
-        HStack {
-            Text(room.name)
-            if let group, group.id == room.uuid, !group.isStandalone {
-                Text("Coordinator")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            // Only the label is the drag source. `.draggable` on the whole row would take
+            // the slider's own drag gesture with it, and grabbing the knob would start
+            // moving the room instead of the volume.
+            HStack(spacing: 6) {
+                Text(room.name)
+                if let group, group.id == room.uuid, !group.isStandalone {
+                    Text("Coordinator")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
             }
-            Spacer()
+            .contentShape(.rect)
+            .draggable(room)
+            .frame(minWidth: 90)
+
+            volumeControl(
+                value: volume.volume(forRoom: room),
+                isMuted: volume.isMuted(room: room),
+                label: room.name,
+                setVolume: { volume.setVolume($0, forRoom: room) },
+                toggleMute: { volume.toggleMute(room: room) }
+            )
+
             if showsActiveToggle, let group {
                 activeToggle(for: group)
             }
             moveMenu(for: room, currentGroup: group)
         }
         .contentShape(.rect)
-        .draggable(room)
         .dropTarget(joining: group?.id ?? room.uuid, model: model)
+    }
+
+    /// The whole group's volume, which moves its members in proportion rather than flattening
+    /// them - so this and the per-room sliders below it are different controls, not two ways
+    /// to reach the same one.
+    private func groupVolumeRow(_ group: SonosGroup) -> some View {
+        HStack(spacing: 8) {
+            Text("All Rooms")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 90, alignment: .leading)
+
+            volumeControl(
+                value: volume.volume(forGroup: group),
+                isMuted: volume.isMuted(group: group),
+                label: group.displayName,
+                setVolume: { volume.setVolume($0, forGroup: group) },
+                toggleMute: { volume.toggleMute(group: group) }
+            )
+
+            Button("Match Quietest") {
+                volume.syncToQuietest(in: group)
+            }
+            .controlSize(.small)
+            .disabled(volume.isSyncing)
+            .help("Set every room in this group to the volume of its quietest one.")
+        }
+    }
+
+    /// A mute button, a slider, and the number.
+    ///
+    /// `value` is nil until the first reading lands. A slider parked at zero would read as
+    /// "this speaker is silent" rather than "not known yet", and dragging it up from there
+    /// would write a volume nobody chose - so it stays disabled until there is a real number
+    /// behind it.
+    private func volumeControl(
+        value: Int?,
+        isMuted: Bool,
+        label: String,
+        setVolume: @escaping (Int) -> Void,
+        toggleMute: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 6) {
+            Button(action: toggleMute) {
+                Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    .foregroundStyle(isMuted ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
+            }
+            .buttonStyle(.plain)
+            .disabled(value == nil)
+            .help(isMuted ? "Unmute \(label)" : "Mute \(label)")
+            .accessibilityLabel(isMuted ? "Unmute \(label)" : "Mute \(label)")
+
+            Slider(
+                value: Binding(
+                    get: { Double(value ?? 0) },
+                    set: { setVolume(Int($0.rounded())) }
+                ),
+                in: Double(VolumeControl.range.lowerBound)...Double(VolumeControl.range.upperBound)
+            )
+            .frame(width: 110)
+            .disabled(value == nil)
+            .accessibilityLabel("\(label) volume")
+            .accessibilityValue(value.map { "\($0) percent" } ?? "Not known yet")
+
+            Text(value.map(String.init) ?? "—")
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 26, alignment: .trailing)
+        }
     }
 
     /// The non-drag path to every destination a drag can reach.
@@ -191,12 +293,20 @@ struct GroupingView: View {
     // MARK: - Footer
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 12) {
             if model.isBusy {
                 ProgressView().controlSize(.small)
                 Text("Updating…").foregroundStyle(.secondary).font(.callout)
             }
             Spacer()
+            if !model.groups.isEmpty {
+                Button("Match All to Quietest") {
+                    volume.syncEverythingToQuietest()
+                }
+                .controlSize(.small)
+                .disabled(volume.isSyncing)
+                .help("Set every speaker in the house to the volume of the quietest one.")
+            }
             liveIndicator
         }
         .padding(.horizontal, 12)
