@@ -7,6 +7,13 @@ enum GroupDestination: Equatable {
     case standalone
 }
 
+/// One grouping call. A single move can need two of these, in order.
+enum GroupingCommand: Equatable {
+    case join(room: SonosRoom, coordinatorUUID: String)
+    case handOffCoordination(room: SonosRoom, successorUUID: String)
+    case makeStandalone(room: SonosRoom)
+}
+
 /// The state behind the grouping editor. Owns the grouping commands and the local
 /// optimistic view of the topology; the app delegate feeds it fresh topology and provides
 /// the refresh action, so this type stays free of discovery and AppKit.
@@ -16,6 +23,9 @@ final class TopologyModel: ObservableObject {
     @Published var errorMessage: String?
     /// The group the media keys drive. Mirrored into `PreferencesStore`.
     @Published private(set) var activeGroupID: String?
+    /// Whether the household is pushing changes to us. Shown in the editor, because a
+    /// topology that has quietly stopped updating looks exactly like one that is correct.
+    @Published private(set) var isReceivingLiveUpdates = false
 
     /// Set by the app delegate to trigger a topology refetch.
     var refreshHandler: (() -> Void)?
@@ -52,6 +62,10 @@ final class TopologyModel: ObservableObject {
         onActiveGroupChanged?()
     }
 
+    func update(isReceivingLiveUpdates: Bool) {
+        self.isReceivingLiveUpdates = isReceivingLiveUpdates
+    }
+
     var allRooms: [SonosRoom] { SonosTopology.allRooms(in: groups) }
 
     /// Matched on UUID alone: a room dragged from the list carries the name and IP it had
@@ -62,28 +76,66 @@ final class TopologyModel: ObservableObject {
 
     // MARK: - Actions
 
-    /// The single place that decides whether a move is worth sending. Every early return
-    /// here happens before `isBusy` is set, so the spinner can't latch on a no-op.
     func move(room: SonosRoom, to destination: GroupDestination) {
-        guard let current = group(containing: room) else { return }
+        // `groups` only catches up on the next discovery, roughly a second after the last
+        // command settles. Deciding a second move against that stale picture picks the
+        // wrong command - ungroup a coordinator, then immediately ungroup the member that
+        // just inherited the group, and we'd send it BecomeCoordinatorOfStandaloneGroup,
+        // which does nothing. Refuse to decide until the topology is real again.
+        guard !isBusy else { return }
+
+        let commands = Self.commands(moving: room, to: destination, in: groups)
+        guard !commands.isEmpty else { return }
+
+        isBusy = true
+        for command in commands {
+            switch command {
+            case let .join(room, coordinatorUUID):
+                grouping.join(room: room, coordinatorUUID: coordinatorUUID)
+            case let .handOffCoordination(room, successorUUID):
+                grouping.handOffCoordination(from: room, to: successorUUID)
+            case let .makeStandalone(room):
+                grouping.makeStandalone(room: room)
+            }
+        }
+    }
+
+    /// Works out which commands a move needs, given a topology. Pure, so the awkward cases
+    /// - coordinators especially - are testable without touching a speaker.
+    ///
+    /// An empty result means the move is a no-op. Callers must check that before marking
+    /// themselves busy: nothing would ever settle to clear it.
+    static func commands(
+        moving room: SonosRoom,
+        to destination: GroupDestination,
+        in groups: [SonosGroup]
+    ) -> [GroupingCommand] {
+        guard let current = groups.first(where: { $0.members.contains { $0.uuid == room.uuid } }) else { return [] }
+        let isCoordinatorOfSharedGroup = current.id == room.uuid && !current.isStandalone
+        let successor = current.members.first { $0.uuid != room.uuid }
 
         switch destination {
         case let .group(coordinatorUUID):
             // Can't join itself, and can't join the group it is already in.
-            guard room.uuid != coordinatorUUID, current.id != coordinatorUUID else { return }
-            isBusy = true
-            grouping.join(room: room, coordinatorUUID: coordinatorUUID)
+            guard room.uuid != coordinatorUUID, current.id != coordinatorUUID else { return [] }
+            guard isCoordinatorOfSharedGroup, let successor else {
+                return [.join(room: room, coordinatorUUID: coordinatorUUID)]
+            }
+            // A coordinator sent an x-rincon: URI takes its whole group along. Hand the old
+            // group to another member first so only this room travels.
+            return [
+                .handOffCoordination(room: room, successorUUID: successor.uuid),
+                .join(room: room, coordinatorUUID: coordinatorUUID),
+            ]
 
         case .standalone:
-            guard !current.isStandalone else { return }
-            isBusy = true
-            if current.id == room.uuid, let successor = current.members.first(where: { $0.uuid != room.uuid }) {
-                // Removing the coordinator: the group has to be handed to another member
-                // first, or the command is a no-op and the room silently stays put.
-                grouping.handOffCoordination(from: room, to: successor.uuid)
-            } else {
-                grouping.makeStandalone(room: room)
+            guard !current.isStandalone else { return [] }
+            guard isCoordinatorOfSharedGroup, let successor else {
+                return [.makeStandalone(room: room)]
             }
+            // BecomeCoordinatorOfStandaloneGroup does nothing to a player that already
+            // coordinates its group; handing the group off is what removes it.
+            return [.handOffCoordination(room: room, successorUUID: successor.uuid)]
         }
     }
 

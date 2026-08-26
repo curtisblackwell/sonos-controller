@@ -36,7 +36,7 @@ struct GroupingView: View {
             } description: {
                 Text("Make sure your Sonos speakers are on the same network, then refresh.")
             } actions: {
-                Button("Refresh") { model.refresh() }
+                Button("Look Again") { model.refresh() }
             }
         } else {
             List {
@@ -46,6 +46,10 @@ struct GroupingView: View {
                 standaloneSection
             }
             .listStyle(.sidebar)
+            // The model refuses moves while one is in flight, since it would be deciding
+            // against a topology that hasn't caught up yet. Disabling says so instead of
+            // letting drops land on nothing.
+            .disabled(model.isBusy)
         }
     }
 
@@ -101,7 +105,8 @@ struct GroupingView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect)
             .dropDestination(for: SonosRoom.self) { rooms, _ in
-                for room in rooms { model.move(room: room, to: .standalone) }
+                guard let room = rooms.first else { return false }
+                model.move(room: room, to: .standalone)
                 return true
             }
         }
@@ -192,21 +197,42 @@ struct GroupingView: View {
                 Text("Updating…").foregroundStyle(.secondary).font(.callout)
             }
             Spacer()
-            Button("Refresh") { model.refresh() }
-                .disabled(model.isBusy)
+            liveIndicator
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
+
+    /// Replaces what used to be a Refresh button. The household pushes its changes now, and
+    /// the subscription repairs itself, so there is nothing left for the user to trigger -
+    /// what they actually need to know is whether what they're looking at is current.
+    @ViewBuilder
+    private var liveIndicator: some View {
+        if model.isReceivingLiveUpdates {
+            Label("Connected to Sonos", systemImage: "dot.radiowaves.left.and.right")
+                .foregroundStyle(.secondary)
+                .font(.callout)
+                .help("Changes made in the Sonos app show up here automatically.")
+        } else {
+            Label("Reconnecting…", systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+                .font(.callout)
+                .help("Not receiving updates from your speakers. Trying to reconnect.")
+        }
+    }
 }
 
 private extension View {
-    /// Accepts dropped rooms into the group coordinated by `coordinatorUUID`.
+    /// Accepts a dropped room into the group coordinated by `coordinatorUUID`.
+    ///
+    /// One room per drop. The list has no multi-selection, so a drag never carries more than
+    /// one - and looping over them would only look like it handled several: the model refuses
+    /// a second move while the first is in flight, so every room after the first was silently
+    /// dropped on the floor.
     func dropTarget(joining coordinatorUUID: String, model: TopologyModel) -> some View {
         dropDestination(for: SonosRoom.self) { rooms, _ in
-            for room in rooms {
-                model.move(room: room, to: .group(coordinatorUUID: coordinatorUUID))
-            }
+            guard let room = rooms.first else { return false }
+            model.move(room: room, to: .group(coordinatorUUID: coordinatorUUID))
             return true
         }
     }
