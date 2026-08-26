@@ -17,8 +17,12 @@ final class SonosGrouping {
     /// Refreshing immediately reliably returns the *old* topology and the UI snaps back.
     private static let settleDelay: TimeInterval = 0.6
 
+    /// Backstop for a completion handler that never runs at all. `SonosControl` already
+    /// bounds the request, so under normal failures that one fires first and we report the
+    /// real error; this only keeps the queue from parking forever if it somehow doesn't.
+    private static let commandTimeout: TimeInterval = SonosControl.requestTimeout + 2
+
     private let queue = DispatchQueue(label: "com.curtisblackwell.sonos-controller.grouping")
-    private let semaphore = DispatchSemaphore(value: 0)
 
     /// Called on the main thread once the queue has drained, so the caller can refetch.
     var onDidSettle: (() -> Void)?
@@ -70,14 +74,23 @@ final class SonosGrouping {
         pendingCount += 1
         queue.async { [weak self] in
             guard let self else { return }
+            // One semaphore per command rather than one for the queue: a reply that arrives
+            // after we have given up would otherwise leave a stray signal behind and let the
+            // *next* command skip its wait entirely.
+            let finished = DispatchSemaphore(value: 0)
             SonosControl.send(action: action, to: room.ipAddress) { result in
                 if case let .failure(error) = result {
                     let message = "Couldn't \(description): \(error.localizedDescription)"
                     DispatchQueue.main.async { self.onError?(message) }
                 }
-                self.semaphore.signal()
+                finished.signal()
             }
-            self.semaphore.wait()
+            if finished.wait(timeout: .now() + Self.commandTimeout) == .timedOut {
+                Self.log.error("Timed out waiting for \(room.name, privacy: .public) to \(description, privacy: .public)")
+                DispatchQueue.main.async {
+                    self.onError?("Couldn't \(description): \(room.name) didn't respond.")
+                }
+            }
 
             // Let the household converge before anyone asks it what the topology is.
             Thread.sleep(forTimeInterval: Self.settleDelay)

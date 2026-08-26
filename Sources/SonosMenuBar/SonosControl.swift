@@ -64,6 +64,11 @@ enum SonosControlError: LocalizedError {
 enum SonosControl {
     private static let log = Logger(subsystem: "com.curtisblackwell.sonos-controller", category: "control")
 
+    /// Every speaker we talk to is on the LAN, so a reply is either quick or never coming.
+    /// URLSession's 60s default means one unplugged player holds a request open for a full
+    /// minute, which is long enough for anything serialized behind it to look like a hang.
+    static let requestTimeout: TimeInterval = 5
+
     static func soapEnvelope(action: SonosAction) -> String {
         let extra = action.arguments
             .map { "<\($0.name)>\(xmlEscaped($0.value))</\($0.name)>" }
@@ -117,6 +122,7 @@ enum SonosControl {
         request.setValue("text/xml; charset=\"utf-8\"", forHTTPHeaderField: "Content-Type")
         request.setValue("\"urn:schemas-upnp-org:service:AVTransport:1#\(action.name)\"", forHTTPHeaderField: "SOAPACTION")
         request.httpBody = Data(soapEnvelope(action: action).utf8)
+        request.timeoutInterval = requestTimeout
 
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error {
