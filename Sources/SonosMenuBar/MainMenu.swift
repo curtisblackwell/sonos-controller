@@ -49,6 +49,7 @@ enum MainMenu {
 
     private static func windowMenu() -> NSMenu {
         let menu = NSMenu(title: "Window")
+        menu.addItem(title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         menu.addItem(title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         menu.addItem(title: "Zoom", action: #selector(NSWindow.performZoom(_:)))
         menu.addItem(.separator())

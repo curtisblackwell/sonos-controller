@@ -88,7 +88,7 @@ struct GroupingView: View {
     private var standaloneSection: some View {
         Section("On Their Own") {
             ForEach(standaloneRooms) { room in
-                roomRow(room, in: model.group(containing: room))
+                roomRow(room, in: model.group(containing: room), showsActiveToggle: true)
             }
             // Always present, even when the section has rooms in it, so there is a stable
             // place to drop a room you want pulled out of its group.
@@ -111,7 +111,12 @@ struct GroupingView: View {
 
     /// Rows are both the drag source and a drop target: dropping one room onto another
     /// puts it in that room's group. Dropping onto a room that is on its own pairs the two.
-    private func roomRow(_ room: SonosRoom, in group: SonosGroup?) -> some View {
+    ///
+    /// `showsActiveToggle` carries the star for rooms that are on their own. A lone room is
+    /// still a group of one and can drive the media keys, but it has no section header of
+    /// its own to hang the star off - without this it would be the one thing in the
+    /// household the window couldn't select.
+    private func roomRow(_ room: SonosRoom, in group: SonosGroup?, showsActiveToggle: Bool = false) -> some View {
         HStack {
             Text(room.name)
             if let group, group.id == room.uuid, !group.isStandalone {
@@ -120,6 +125,9 @@ struct GroupingView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if showsActiveToggle, let group {
+                activeToggle(for: group)
+            }
             moveMenu(for: room, currentGroup: group)
         }
         .contentShape(.rect)
@@ -167,7 +175,7 @@ struct GroupingView: View {
                 .foregroundStyle(model.activeGroupID == group.id ? .yellow : .secondary)
         }
         .buttonStyle(.plain)
-        .help("Send media key presses to this group")
+        .help(group.isStandalone ? "Send media key presses to this speaker" : "Send media key presses to this group")
         .accessibilityLabel(
             model.activeGroupID == group.id
                 ? "\(group.displayName) receives media keys"

@@ -12,8 +12,14 @@ enum SonosAction {
     /// Grouping: pointing a player at `x-rincon:<coordinatorUUID>` makes it join that
     /// player's group. Also the normal way to set a playback source.
     case setAVTransportURI(uri: String, metadata: String)
-    /// Grouping: pulls a player out of whatever group it is in.
+    /// Grouping: pulls a *non-coordinating* player out of whatever group it is in.
+    /// Sending this to a player that already coordinates its group does nothing at all -
+    /// use `delegateGroupCoordinationTo` for that case.
     case becomeCoordinatorOfStandaloneGroup
+    /// Grouping: hands coordination of a group to another member. With `rejoinGroup` false
+    /// the old coordinator drops out, which is the only way to remove a coordinator from a
+    /// group that should carry on without it.
+    case delegateGroupCoordinationTo(newCoordinator: String, rejoinGroup: Bool)
 
     var name: String {
         switch self {
@@ -24,6 +30,7 @@ enum SonosAction {
         case .getTransportInfo: return "GetTransportInfo"
         case .setAVTransportURI: return "SetAVTransportURI"
         case .becomeCoordinatorOfStandaloneGroup: return "BecomeCoordinatorOfStandaloneGroup"
+        case .delegateGroupCoordinationTo: return "DelegateGroupCoordinationTo"
         }
     }
 
@@ -36,6 +43,8 @@ enum SonosAction {
             return []
         case let .setAVTransportURI(uri, metadata):
             return [("CurrentURI", uri), ("CurrentURIMetaData", metadata)]
+        case let .delegateGroupCoordinationTo(newCoordinator, rejoinGroup):
+            return [("NewCoordinator", newCoordinator), ("RejoinGroup", rejoinGroup ? "1" : "0")]
         }
     }
 }

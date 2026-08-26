@@ -42,31 +42,48 @@ final class TopologyModel: ObservableObject {
 
     func update(groups: [SonosGroup]) {
         self.groups = groups
-        // A group that has disappeared can no longer be the media key target.
-        if let id = activeGroupID, !groups.contains(where: { $0.id == id }) {
-            activeGroupID = nil
-        }
+        // The app delegate reconciles the saved selection against the fresh topology before
+        // handing it over, so PreferencesStore is the authority - re-read it rather than
+        // only ever clearing. Clearing alone meant one empty fetch dropped the editor's
+        // star for the rest of the session while the status menu kept its checkmark.
+        let resolved = PreferencesStore.activeGroupID
+        guard resolved != activeGroupID else { return }
+        activeGroupID = resolved
+        onActiveGroupChanged?()
     }
 
     var allRooms: [SonosRoom] { SonosTopology.allRooms(in: groups) }
 
+    /// Matched on UUID alone: a room dragged from the list carries the name and IP it had
+    /// when the drag started, and a refresh in between would make full equality miss.
     func group(containing room: SonosRoom) -> SonosGroup? {
-        groups.first { $0.members.contains(room) }
+        groups.first { $0.members.contains { $0.uuid == room.uuid } }
     }
 
     // MARK: - Actions
 
+    /// The single place that decides whether a move is worth sending. Every early return
+    /// here happens before `isBusy` is set, so the spinner can't latch on a no-op.
     func move(room: SonosRoom, to destination: GroupDestination) {
+        guard let current = group(containing: room) else { return }
+
         switch destination {
         case let .group(coordinatorUUID):
-            guard group(containing: room)?.id != coordinatorUUID else { return }
+            // Can't join itself, and can't join the group it is already in.
+            guard room.uuid != coordinatorUUID, current.id != coordinatorUUID else { return }
             isBusy = true
             grouping.join(room: room, coordinatorUUID: coordinatorUUID)
+
         case .standalone:
-            // Already the sole member of its own group - nothing to do.
-            guard group(containing: room)?.isStandalone != true else { return }
+            guard !current.isStandalone else { return }
             isBusy = true
-            grouping.makeStandalone(room: room)
+            if current.id == room.uuid, let successor = current.members.first(where: { $0.uuid != room.uuid }) {
+                // Removing the coordinator: the group has to be handed to another member
+                // first, or the command is a no-op and the room silently stays put.
+                grouping.handOffCoordination(from: room, to: successor.uuid)
+            } else {
+                grouping.makeStandalone(room: room)
+            }
         }
     }
 

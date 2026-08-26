@@ -31,8 +31,11 @@ final class SonosGrouping {
     var isBusy: Bool { pendingCount > 0 }
 
     /// Puts `room` into the group coordinated by `coordinatorUUID`.
+    ///
+    /// Preconditions are the caller's job - `TopologyModel.move` is the single place that
+    /// decides whether a move is a no-op. A second guard here would silently skip the
+    /// enqueue and strand the caller's in-progress state, since nothing would ever settle.
     func join(room: SonosRoom, coordinatorUUID: String) {
-        guard room.uuid != coordinatorUUID else { return }
         Self.log.notice("Joining \(room.name, privacy: .public) to \(coordinatorUUID, privacy: .public)")
         enqueue(
             action: .setAVTransportURI(uri: "x-rincon:\(coordinatorUUID)", metadata: ""),
@@ -41,7 +44,19 @@ final class SonosGrouping {
         )
     }
 
-    /// Pulls `room` out of whatever group it is currently in.
+    /// Hands coordination of `room`'s group to `successorUUID` and drops `room` out of it.
+    /// The only way to remove a coordinator: `BecomeCoordinatorOfStandaloneGroup` sent to a
+    /// player that already coordinates its group returns 200 and changes nothing.
+    func handOffCoordination(from room: SonosRoom, to successorUUID: String) {
+        Self.log.notice("Handing \(room.name, privacy: .public) group to \(successorUUID, privacy: .public)")
+        enqueue(
+            action: .delegateGroupCoordinationTo(newCoordinator: successorUUID, rejoinGroup: false),
+            on: room,
+            describedAs: "remove \(room.name) from its group"
+        )
+    }
+
+    /// Pulls a non-coordinating `room` out of whatever group it is currently in.
     func makeStandalone(room: SonosRoom) {
         Self.log.notice("Ungrouping \(room.name, privacy: .public)")
         enqueue(

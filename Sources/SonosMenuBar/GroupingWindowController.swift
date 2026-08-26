@@ -15,6 +15,10 @@ final class GroupingWindowController: NSWindowController {
         )
         window.title = "Speaker Groups"
         window.contentView = NSHostingView(rootView: GroupingView(model: model))
+        // Centre before adopting the autosaved frame: contentRect's origin is (0,0), so a
+        // first launch with nothing saved would otherwise put the app's main window in the
+        // bottom-left corner, behind the Dock.
+        window.center()
         window.setFrameAutosaveName("GroupingWindow")
         window.isReleasedWhenClosed = false
         super.init(window: window)

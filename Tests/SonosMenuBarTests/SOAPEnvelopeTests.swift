@@ -64,9 +64,28 @@ struct GroupingEnvelopeTests {
         #expect(envelope.contains("<CurrentURIMetaData>&lt;DIDL-Lite&gt;</CurrentURIMetaData>"))
     }
 
+    @Test func coordinatorHandoffEnvelope() {
+        let envelope = SonosControl.soapEnvelope(
+            action: .delegateGroupCoordinationTo(newCoordinator: "RINCON_KITCHEN01400", rejoinGroup: false)
+        )
+        #expect(envelope.contains("<u:DelegateGroupCoordinationTo"))
+        #expect(envelope.contains("<InstanceID>0</InstanceID>"))
+        #expect(envelope.contains("<NewCoordinator>RINCON_KITCHEN01400</NewCoordinator>"))
+        // false means the old coordinator drops out rather than staying on as a member.
+        #expect(envelope.contains("<RejoinGroup>0</RejoinGroup>"))
+    }
+
+    @Test func rejoinGroupSerializesAsUPnPBoolean() {
+        let rejoining = SonosControl.soapEnvelope(
+            action: .delegateGroupCoordinationTo(newCoordinator: "RINCON_X", rejoinGroup: true)
+        )
+        #expect(rejoining.contains("<RejoinGroup>1</RejoinGroup>"))
+    }
+
     @Test func actionNamesMatchTheUPnPService() {
         #expect(SonosAction.setAVTransportURI(uri: "", metadata: "").name == "SetAVTransportURI")
         #expect(SonosAction.becomeCoordinatorOfStandaloneGroup.name == "BecomeCoordinatorOfStandaloneGroup")
+        #expect(SonosAction.delegateGroupCoordinationTo(newCoordinator: "", rejoinGroup: false).name == "DelegateGroupCoordinationTo")
         #expect(SonosAction.getTransportInfo.name == "GetTransportInfo")
     }
 }
