@@ -188,7 +188,17 @@ struct GroupingView: View {
                 isMuted: volume.isMuted(group: group),
                 label: group.displayName,
                 setVolume: { volume.setVolume($0, forGroup: group) },
-                toggleMute: { volume.toggleMute(group: group) }
+                toggleMute: { volume.toggleMute(group: group) },
+                // Every position of the drag is scaled from where the members were when it
+                // started. Without that, each frame would rescale the result of the last one
+                // and the rounding would grind the group out of balance.
+                onEditingChanged: { editing in
+                    if editing {
+                        volume.beginGroupDrag(group)
+                    } else {
+                        volume.endGroupDrag(group)
+                    }
+                }
             )
 
             Button("Match Quietest") {
@@ -211,7 +221,8 @@ struct GroupingView: View {
         isMuted: Bool,
         label: String,
         setVolume: @escaping (Int) -> Void,
-        toggleMute: @escaping () -> Void
+        toggleMute: @escaping () -> Void,
+        onEditingChanged: @escaping (Bool) -> Void = { _ in }
     ) -> some View {
         HStack(spacing: 6) {
             Button(action: toggleMute) {
@@ -228,7 +239,8 @@ struct GroupingView: View {
                     get: { Double(value ?? 0) },
                     set: { setVolume(Int($0.rounded())) }
                 ),
-                in: Double(VolumeControl.range.lowerBound)...Double(VolumeControl.range.upperBound)
+                in: Double(VolumeControl.range.lowerBound)...Double(VolumeControl.range.upperBound),
+                onEditingChanged: onEditingChanged
             )
             .frame(width: 110)
             .disabled(value == nil)

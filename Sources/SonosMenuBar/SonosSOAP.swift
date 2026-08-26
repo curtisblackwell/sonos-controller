@@ -21,9 +21,10 @@ struct SonosService {
         controlPath: "/MediaRenderer/RenderingControl/Control"
     )
 
-    /// A whole group's volume and mute, addressed to its coordinator. Setting it scales the
-    /// members in proportion, which is the point: writing the same number to every member
-    /// instead would flatten a balance the user deliberately set.
+    /// A whole group's mute, addressed to its coordinator. Only mute: the volume half of
+    /// this service moves members in proportion rather than by equal amounts, so a group at
+    /// 80/40 nudged up moves one speaker twice as far as the other. Mute has no amount to
+    /// get wrong, and one call beats one per member.
     static let groupRenderingControl = SonosService(
         type: "urn:schemas-upnp-org:service:GroupRenderingControl:1",
         controlPath: "/MediaRenderer/GroupRenderingControl/Control"

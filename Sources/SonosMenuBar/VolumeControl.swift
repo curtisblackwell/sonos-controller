@@ -34,17 +34,16 @@ enum RenderingAction: SonosSOAPAction {
     }
 }
 
-/// A whole group's volume and mute, addressed to its coordinator.
+/// A whole group's mute, addressed to its coordinator.
 ///
-/// Unlike `RenderingAction` these take no `Channel` - a group has no stereo channels of its
-/// own - and `SetGroupVolume` moves every member in proportion rather than to the same
-/// number, so a group that was deliberately unbalanced stays that way.
+/// Mute only. The volume actions on this service exist, but they scale the members in
+/// proportion - move a group at 80/40 up and one speaker travels twice as far as the other,
+/// which is not what "turn the group up" means to anyone using it. Group volume is a uniform
+/// adjustment written to each member instead; see `VolumeModel`.
+///
+/// Unlike `RenderingAction` these take no `Channel`: a group has no stereo channels of its
+/// own, and sending one is how you get a 402 back.
 enum GroupRenderingAction: SonosSOAPAction {
-    case getGroupVolume
-    case setGroupVolume(Int)
-    /// Returns `NewVolume`, already clamped by the speaker. One round trip with no read
-    /// first, which is what makes it the right thing for a volume key.
-    case setRelativeGroupVolume(Int)
     case getGroupMute
     case setGroupMute(Bool)
 
@@ -52,9 +51,6 @@ enum GroupRenderingAction: SonosSOAPAction {
 
     var name: String {
         switch self {
-        case .getGroupVolume: return "GetGroupVolume"
-        case .setGroupVolume: return "SetGroupVolume"
-        case .setRelativeGroupVolume: return "SetRelativeGroupVolume"
         case .getGroupMute: return "GetGroupMute"
         case .setGroupMute: return "SetGroupMute"
         }
@@ -62,12 +58,8 @@ enum GroupRenderingAction: SonosSOAPAction {
 
     var arguments: [(name: String, value: String)] {
         switch self {
-        case .getGroupVolume, .getGroupMute:
+        case .getGroupMute:
             return []
-        case let .setGroupVolume(volume):
-            return [("DesiredVolume", String(VolumeControl.clamped(volume)))]
-        case let .setRelativeGroupVolume(adjustment):
-            return [("Adjustment", String(adjustment))]
         case let .setGroupMute(muted):
             return [("DesiredMute", muted ? "1" : "0")]
         }
@@ -81,9 +73,10 @@ enum VolumeControl {
 
     static let range = 0...100
 
-    /// What one press of a volume key moves the group by. macOS's own volume keys step by a
-    /// sixteenth of the range, so this is deliberately close to what the same key does to
-    /// the machine's speakers - a Sonos press that moved noticeably less would feel broken.
+    /// What one press of a volume key moves every speaker in the group by. macOS's own
+    /// volume keys step by a sixteenth of the range, so this is deliberately close to what
+    /// the same key does to the machine's speakers - a Sonos press that moved noticeably
+    /// less would feel broken.
     static let keyStep = 6
 
     static func clamped(_ volume: Int) -> Int {
@@ -91,20 +84,6 @@ enum VolumeControl {
     }
 
     // MARK: - Group
-
-    static func groupVolume(coordinatorIP: String, completion: @escaping (Int?) -> Void) {
-        read(GroupRenderingAction.getGroupVolume, named: "CurrentVolume", from: coordinatorIP, completion: completion)
-    }
-
-    static func setGroupVolume(_ volume: Int, coordinatorIP: String, completion: @escaping (Bool) -> Void = { _ in }) {
-        write(GroupRenderingAction.setGroupVolume(volume), to: coordinatorIP, completion: completion)
-    }
-
-    /// Nudges a group up or down without reading it first. The speaker clamps, so a press at
-    /// either end is a no-op rather than an error.
-    static func adjustGroupVolume(by adjustment: Int, coordinatorIP: String, completion: @escaping (Int?) -> Void = { _ in }) {
-        read(GroupRenderingAction.setRelativeGroupVolume(adjustment), named: "NewVolume", from: coordinatorIP, completion: completion)
-    }
 
     static func groupMute(coordinatorIP: String, completion: @escaping (Bool?) -> Void) {
         read(GroupRenderingAction.getGroupMute, named: "CurrentMute", from: coordinatorIP) { value in
@@ -141,6 +120,7 @@ enum VolumeControl {
     static func setRoomVolume(_ volume: Int, ip: String, completion: @escaping (Bool) -> Void = { _ in }) {
         write(RenderingAction.setVolume(volume), to: ip, completion: completion)
     }
+
 
     static func roomMute(ip: String, completion: @escaping (Bool?) -> Void) {
         read(RenderingAction.getMute, named: "CurrentMute", from: ip) { value in

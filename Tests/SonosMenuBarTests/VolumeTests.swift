@@ -13,13 +13,10 @@ struct VolumeEnvelopeTests {
     }
 
     /// The speaker would clamp anyway, but a slider that briefly reported 104 shouldn't be
-    /// the thing that finds out - and `SetRelativeGroupVolume` deliberately does *not* clamp,
-    /// since a negative adjustment is the whole point of it.
+    /// the thing that finds out.
     @Test func volumeArgumentsAreClampedToTheSonosRange() {
         #expect(SonosSOAP.envelope(action: RenderingAction.setVolume(140)).contains("<DesiredVolume>100</DesiredVolume>"))
         #expect(SonosSOAP.envelope(action: RenderingAction.setVolume(-5)).contains("<DesiredVolume>0</DesiredVolume>"))
-        #expect(SonosSOAP.envelope(action: GroupRenderingAction.setGroupVolume(200)).contains("<DesiredVolume>100</DesiredVolume>"))
-        #expect(SonosSOAP.envelope(action: GroupRenderingAction.setRelativeGroupVolume(-6)).contains("<Adjustment>-6</Adjustment>"))
     }
 
     @Test func muteIsSentAsOneOrZero() {
@@ -30,8 +27,8 @@ struct VolumeEnvelopeTests {
 
     /// A group has no stereo channels of its own, and sending one is how you get a 402 back.
     @Test func groupActionsTakeNoChannel() {
-        let envelope = SonosSOAP.envelope(action: GroupRenderingAction.getGroupVolume)
-        #expect(envelope.contains("<u:GetGroupVolume xmlns:u=\"urn:schemas-upnp-org:service:GroupRenderingControl:1\">"))
+        let envelope = SonosSOAP.envelope(action: GroupRenderingAction.getGroupMute)
+        #expect(envelope.contains("<u:GetGroupMute xmlns:u=\"urn:schemas-upnp-org:service:GroupRenderingControl:1\">"))
         #expect(envelope.contains("<InstanceID>0</InstanceID>"))
         #expect(!envelope.contains("<Channel>"))
     }
@@ -62,6 +59,73 @@ struct SOAPValueTests {
     @Test func aBodyWithTheTagsTheWrongWayRoundReadsAsNothing() {
         let body = Data("</CurrentVolume>42<CurrentVolume>".utf8)
         #expect(SonosSOAP.value(named: "CurrentVolume", in: body) == nil)
+    }
+}
+
+struct GroupScalingTests {
+    private func room(_ uuid: String, _ name: String, _ ip: String) -> SonosRoom {
+        SonosRoom(uuid: uuid, name: name, ipAddress: ip)
+    }
+
+    /// The bug this whole path exists for: `GroupRenderingControl` answers a nudge on a level
+    /// group by fanning it back out to a balance it remembers from before. Scaling by ratio
+    /// leaves a level group level.
+    @Test func alevelGroupStaysLevel() {
+        let targets = VolumeModel.memberTargets(
+            baseline: ["a": 7, "b": 7, "c": 7, "d": 7],
+            movingFrom: 7,
+            to: 13
+        )
+        #expect(targets == ["a": 13, "b": 13, "c": 13, "d": 13])
+    }
+
+    @Test func membersKeepTheirShareOfAnUnevenGroup() {
+        // Mean of 22 and 34 is 28; asking for 42 is a ratio of 1.5.
+        let targets = VolumeModel.memberTargets(baseline: ["a": 22, "b": 34], movingFrom: 28, to: 42)
+        #expect(targets == ["a": 33, "b": 51])
+    }
+
+    /// Partway through a drag the speakers are nowhere near the baseline, so a position that
+    /// happens to equal the one the drag started at still has to be written - otherwise
+    /// pulling the slider back to where you picked it up leaves the group where it was.
+    @Test func returningToTheBaselineRestoresIt() {
+        #expect(VolumeModel.memberTargets(baseline: ["a": 40, "b": 20], movingFrom: 30, to: 30) == ["a": 40, "b": 20])
+    }
+
+    /// A speaker quiet enough that the ratio rounds it onto itself is still reported; the
+    /// caller drops the write after comparing with what the speaker is currently at.
+    @Test func everyMemberIsAccountedFor() {
+        let targets = VolumeModel.memberTargets(baseline: ["a": 1, "b": 59], movingFrom: 30, to: 31)
+        #expect(targets == ["a": 1, "b": 61])
+    }
+
+    /// Zero has no ratio - every member is 0, and scaling would pin the group there forever.
+    @Test func aGroupScaledToSilenceCanStillComeBack() {
+        #expect(VolumeModel.memberTargets(baseline: ["a": 30, "b": 50], movingFrom: 40, to: 0) == ["a": 0, "b": 0])
+        #expect(VolumeModel.memberTargets(baseline: ["a": 0, "b": 0], movingFrom: 0, to: 12) == ["a": 12, "b": 12])
+        #expect(VolumeModel.memberTargets(baseline: ["a": 0, "b": 0], movingFrom: 0, to: 0) == ["a": 0, "b": 0])
+    }
+
+    @Test func targetsAreClampedPerMember() {
+        let targets = VolumeModel.memberTargets(baseline: ["a": 60, "b": 90], movingFrom: 75, to: 100)
+        #expect(targets["a"] == 80)
+        #expect(targets["b"] == 100)
+    }
+
+    /// A group slider can only be moved once every member has answered: an average over the
+    /// rooms that did would be a baseline that doesn't describe the group, and the first
+    /// nudge would scale the silent ones by the wrong ratio.
+    @Test func groupVolumeNeedsEveryMember() {
+        let rooms = [room("a", "Kitchen", "192.168.1.1"), room("b", "Office", "192.168.1.2")]
+        #expect(VolumeModel.averageVolume(of: rooms, in: ["a": 20, "b": 30]) == 25)
+        #expect(VolumeModel.averageVolume(of: rooms, in: ["a": 20]) == nil)
+        #expect(VolumeModel.averageVolume(of: [], in: ["a": 20]) == nil)
+    }
+
+    /// Sonos rounds the same way: 22/34/37/27 reads back as a group volume of 30.
+    @Test func groupVolumeIsTheRoundedMean() {
+        let rooms = [room("a", "Roam", "1"), room("b", "Living Room", "2"), room("c", "Bedroom", "3"), room("d", "Office", "4")]
+        #expect(VolumeModel.averageVolume(of: rooms, in: ["a": 22, "b": 34, "c": 37, "d": 27]) == 30)
     }
 }
 
