@@ -6,13 +6,20 @@ import os.log
 /// NOTIFY to a callback URL, so subscribing means being reachable - there is no way to have
 /// them pushed down the subscribing connection.
 ///
-/// It serves exactly one path and answers everything else with a 404.
+/// It serves exactly one path and answers everything else with a 404. Anything on the LAN can
+/// connect to it, so it reports who sent each event and lets the caller decide whether to
+/// believe it.
 final class GENAEventListener {
     private static let log = Logger(subsystem: "com.curtis.sonos-controller", category: "gena-listener")
     static let callbackPath = "/notify"
 
-    /// Called on the main thread with the NOTIFY's SID header (empty if it had none) and body.
-    var onEvent: ((String, Data) -> Void)?
+    /// A speaker that has opened a connection but not finished a request by then is either
+    /// broken or not a speaker; either way the socket is not worth holding open.
+    private static let requestTimeout: TimeInterval = 15
+
+    /// Called on the main thread with the NOTIFY's SID header (empty if it had none), the
+    /// address it came from, and the body.
+    var onEvent: ((_ sid: String, _ sourceIP: String, _ body: Data) -> Void)?
 
     /// Main thread only, so `callbackURL(reachableFrom:)` can be called straight from the
     /// subscribe path without hopping queues.
@@ -20,9 +27,22 @@ final class GENAEventListener {
 
     private let queue = DispatchQueue(label: "com.curtis.sonos-controller.gena-listener")
     private var listener: NWListener?
-    /// NWConnection is not retained by the listener, so a connection dropped here is a
-    /// connection torn down mid-request.
-    private var connections: [ObjectIdentifier: NWConnection] = [:]
+    /// One per open connection. NWConnection isn't retained by the listener, so dropping an
+    /// entry here is what tears the connection down.
+    private var connections: [ObjectIdentifier: ConnectionState] = [:]
+
+    /// The per-connection state a receive loop needs. A class so the loop can be a method -
+    /// as a local function recursing into its own escaping closure it captured itself, and
+    /// leaked the connection and its buffer on every event.
+    private final class ConnectionState {
+        let connection: NWConnection
+        var parser = HTTPRequestParser()
+        var timeout: DispatchWorkItem?
+
+        init(connection: NWConnection) {
+            self.connection = connection
+        }
+    }
 
     /// Binds an ephemeral port and calls back on the main thread with it, or nil if the
     /// listener could not start - in which case there is no point subscribing to anything.
@@ -81,7 +101,10 @@ final class GENAEventListener {
         listener?.cancel()
         listener = nil
         queue.async {
-            for connection in self.connections.values { connection.cancel() }
+            for state in self.connections.values {
+                state.timeout?.cancel()
+                state.connection.cancel()
+            }
             self.connections = [:]
         }
     }
@@ -128,60 +151,98 @@ final class GENAEventListener {
         return String(cString: text)
     }
 
+    /// The peer's address, with the noise an NWEndpoint description carries stripped: a
+    /// scope id on link-local addresses, and the `::ffff:` prefix a dual-stack listener puts
+    /// in front of IPv4 peers. Callers compare this against a speaker's address, so the two
+    /// have to be spelled the same way.
+    static func sourceIP(of endpoint: NWEndpoint) -> String {
+        guard case let .hostPort(host, _) = endpoint else { return "" }
+        var text = "\(host)"
+        if let percent = text.firstIndex(of: "%") { text = String(text[text.startIndex..<percent]) }
+        if text.hasPrefix("::ffff:") { text = String(text.dropFirst("::ffff:".count)) }
+        return text
+    }
+
     // MARK: - Connection handling
 
-    /// Runs on `queue`, as does everything it starts: `connections` is touched from the
-    /// receive completions too.
+    /// Runs on `queue`, as does everything it starts.
     private func accept(_ connection: NWConnection) {
         let key = ObjectIdentifier(connection)
-        connections[key] = connection
+        let state = ConnectionState(connection: connection)
+        connections[key] = state
 
-        var parser = HTTPRequestParser()
-        connection.stateUpdateHandler = { [weak self] state in
-            switch state {
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, self.connections[key] != nil else { return }
+            Self.log.notice("Dropping a connection that never finished its request")
+            self.closeConnection(key)
+        }
+        state.timeout = timeout
+        queue.asyncAfter(deadline: .now() + Self.requestTimeout, execute: timeout)
+
+        connection.stateUpdateHandler = { [weak self] connectionState in
+            switch connectionState {
             case .failed, .cancelled:
-                self?.connections[key] = nil
+                self?.closeConnection(key)
             default:
                 break
             }
         }
-
-        func receive() {
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
-                guard let self else { return }
-                if let data, !data.isEmpty, let request = parser.consume(data) {
-                    self.respond(to: request, on: connection)
-                    return
-                }
-                // A body split across reads is the normal case; only give up when the peer
-                // is finished or the socket broke.
-                guard !isComplete, error == nil else {
-                    connection.cancel()
-                    return
-                }
-                receive()
-            }
-        }
-
         connection.start(queue: queue)
-        receive()
+        receive(key)
     }
 
-    private func respond(to request: HTTPRequestParser.Request, on connection: NWConnection) {
+    private func receive(_ key: ObjectIdentifier) {
+        guard let state = connections[key] else { return }
+        state.connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
+            guard let self, let state = self.connections[key] else { return }
+            if let data, !data.isEmpty {
+                switch state.parser.consume(data) {
+                case let .complete(request):
+                    // No close here: `respond` hangs it off the send, so the speaker
+                    // actually gets its 200.
+                    self.respond(to: request, on: state.connection, key: key)
+                    return
+                case .malformed:
+                    self.closeConnection(key)
+                    return
+                case .incomplete:
+                    break
+                }
+            }
+            // A body split across reads is the normal case; only give up when the peer is
+            // finished or the socket broke.
+            guard !isComplete, error == nil else {
+                self.closeConnection(key)
+                return
+            }
+            self.receive(key)
+        }
+    }
+
+    /// Must be called on `queue`. Cancelling re-enters through `stateUpdateHandler`, which
+    /// is harmless once the entry is gone.
+    private func closeConnection(_ key: ObjectIdentifier) {
+        guard let state = connections.removeValue(forKey: key) else { return }
+        state.timeout?.cancel()
+        state.connection.cancel()
+    }
+
+    private func respond(to request: HTTPRequestParser.Request, on connection: NWConnection, key: ObjectIdentifier) {
         let isEvent = request.method == "NOTIFY" && request.path == Self.callbackPath
         let status = isEvent ? "200 OK" : "404 Not Found"
         // Answer before doing anything with the body: a speaker that doesn't get its 200
         // quickly drops the subscription.
         let response = "HTTP/1.1 \(status)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in
-            connection.cancel()
+        connection.send(content: Data(response.utf8), completion: .contentProcessed { [weak self] _ in
+            self?.closeConnection(key)
         })
 
         guard isEvent else { return }
         let sid = request.headers["sid"] ?? ""
+        let sourceIP = Self.sourceIP(of: connection.endpoint)
         let body = request.body
         DispatchQueue.main.async { [weak self] in
-            self?.onEvent?(sid, body)
+            self?.onEvent?(sid, sourceIP, body)
         }
     }
 }

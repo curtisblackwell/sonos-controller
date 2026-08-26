@@ -121,7 +121,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         discovery.discover { [weak self] devices in
             guard let self else { return }
             let ips = devices.map(\.ipAddress)
-            self.knownDeviceIPs = ips
+            // Keep the previous list when a scan finds nothing: a missed multicast round is
+            // commoner than a household disappearing, and throwing the addresses away costs
+            // the next Refresh a full scan to learn them again.
+            if !ips.isEmpty { self.knownDeviceIPs = ips }
             // Also the subscriber's failover list: the speaker it is subscribed to may have
             // dropped off the network since the last scan.
             self.topologySubscriber.update(candidateIPs: ips)

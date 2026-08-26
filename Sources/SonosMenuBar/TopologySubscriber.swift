@@ -27,8 +27,14 @@ final class TopologySubscriber {
     private let listener = GENAEventListener()
     private var candidateIPs: [String] = []
     private var subscribedIP: String?
+    /// The speaker a SUBSCRIBE is in flight to. Its first event routinely beats the response
+    /// back, so events have to be attributable to it before there is a SID to match.
+    private var pendingIP: String?
     private var sid: String?
     private var isSubscribing = false
+    /// Set when the candidate list changes mid-SUBSCRIBE. Acting on it there would leave the
+    /// in-flight response to bind a speaker we've already decided against.
+    private var needsRestart = false
     private var renewTimer: Timer?
     private var retryTimer: Timer?
     private var coalesceTimer: Timer?
@@ -36,8 +42,8 @@ final class TopologySubscriber {
     private var wakeObserver: NSObjectProtocol?
 
     func start() {
-        listener.onEvent = { [weak self] _, body in
-            self?.handleEvent(body: body)
+        listener.onEvent = { [weak self] sid, sourceIP, body in
+            self?.handleEvent(sid: sid, sourceIP: sourceIP, body: body)
         }
         listener.start { [weak self] port in
             guard let self else { return }
@@ -66,7 +72,17 @@ final class TopologySubscriber {
     /// dropped out of the household - an unchanged list is the common case and must not
     /// churn a working subscription.
     func update(candidateIPs: [String]) {
+        // A scan that found nothing is far more often a missed multicast than a household
+        // that has gone away. Tearing down a working subscription over it loses live updates
+        // until someone thinks to hit Rescan.
+        guard !candidateIPs.isEmpty else { return }
         self.candidateIPs = candidateIPs
+
+        // Let the in-flight attempt land first; it re-checks the list against what it bound.
+        guard !isSubscribing else {
+            needsRestart = true
+            return
+        }
         if sid != nil, let subscribedIP, candidateIPs.contains(subscribedIP) { return }
         dropSubscription()
         subscribeToFirstReachable()
@@ -86,18 +102,21 @@ final class TopologySubscriber {
     // MARK: - Subscription lifecycle
 
     private func subscribeToFirstReachable() {
-        subscribe(candidateIndex: 0)
+        needsRestart = false
+        // Walk a snapshot: discovery can replace `candidateIPs` while an attempt is in the
+        // air, and an index into the old list picks an unrelated speaker out of the new one.
+        subscribe(to: candidateIPs, index: 0)
     }
 
     /// Walks the candidates in order until one accepts. A speaker that answered SSDP can
     /// still refuse or time out here, so a single failure isn't a reason to give up.
-    private func subscribe(candidateIndex index: Int) {
+    private func subscribe(to candidates: [String], index: Int) {
         guard sid == nil, !isSubscribing, listener.port != nil else { return }
         retryTimer?.invalidate()
         retryTimer = nil
 
-        guard index < candidateIPs.count else {
-            guard !candidateIPs.isEmpty else { return }
+        guard index < candidates.count else {
+            guard !candidates.isEmpty else { return }
             Self.log.notice("No speaker accepted a topology subscription, retrying in \(Int(Self.retryDelay), privacy: .public)s")
             retryTimer = Timer.scheduledTimer(withTimeInterval: Self.retryDelay, repeats: false) { [weak self] _ in
                 self?.subscribeToFirstReachable()
@@ -105,25 +124,40 @@ final class TopologySubscriber {
             return
         }
 
-        let ip = candidateIPs[index]
+        let ip = candidates[index]
         guard let eventURL = Self.eventURL(ip: ip), let callbackURL = listener.callbackURL(reachableFrom: ip) else {
-            subscribe(candidateIndex: index + 1)
+            subscribe(to: candidates, index: index + 1)
             return
         }
 
         isSubscribing = true
+        pendingIP = ip
         GENA.subscribe(eventURL: eventURL, callbackURL: callbackURL) { [weak self] result in
             guard let self else { return }
             self.isSubscribing = false
+            self.pendingIP = nil
             switch result {
             case let .success(lease):
                 Self.log.notice("Subscribed to \(ip, privacy: .public) topology, lease \(Int(lease.timeout), privacy: .public)s")
                 self.sid = lease.sid
                 self.subscribedIP = ip
                 self.scheduleRenew(after: lease.timeout)
+                // The list may have been replaced while this was in the air. Only start over
+                // if the speaker we just bound has gone from it - a list that still contains
+                // it is a subscription worth keeping, and tearing it down here churned one
+                // per scan at launch.
+                self.needsRestart = false
+                if !self.candidateIPs.contains(ip) {
+                    self.dropSubscription()
+                    self.subscribeToFirstReachable()
+                }
             case let .failure(error):
                 Self.log.notice("SUBSCRIBE to \(ip, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
-                self.subscribe(candidateIndex: index + 1)
+                guard !self.needsRestart else {
+                    self.subscribeToFirstReachable()
+                    return
+                }
+                self.subscribe(to: candidates, index: index + 1)
             }
         }
     }
@@ -168,15 +202,26 @@ final class TopologySubscriber {
         }
         sid = nil
         subscribedIP = nil
+        pendingIP = nil
     }
 
     // MARK: - Events
 
-    /// Accepts every event on our callback path regardless of SID. The first NOTIFY often
-    /// beats the SUBSCRIBE response back, so matching on a SID we haven't stored yet would
-    /// throw away the one event we're guaranteed to get; and a late event from a
-    /// subscription we've dropped still describes the same household.
-    private func handleEvent(body: Data) {
+    /// A topology decides where the media keys point, so an event has to come from the
+    /// speaker we subscribed to. Matching on SID alone isn't enough on its own: the first
+    /// NOTIFY routinely beats the SUBSCRIBE response back, so there is a window with no SID
+    /// to match - which is what `pendingIP` covers. Once we have a SID, it must agree too.
+    private func handleEvent(sid: String, sourceIP: String, body: Data) {
+        let expectedIP = subscribedIP ?? pendingIP
+        guard let expectedIP, sourceIP == expectedIP else {
+            Self.log.notice("Ignoring a topology event from \(sourceIP, privacy: .public)")
+            return
+        }
+        if let ourSID = self.sid, sid != ourSID {
+            Self.log.notice("Ignoring a topology event with an unknown SID")
+            return
+        }
+
         let groups = SonosTopology.parseGroups(fromEventBody: body)
         Self.log.notice("Topology event carrying \(groups.count, privacy: .public) groups")
         // An event we can't parse, or one for a household with nothing controllable in it,

@@ -105,7 +105,8 @@ struct GroupingView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect)
             .dropDestination(for: SonosRoom.self) { rooms, _ in
-                for room in rooms { model.move(room: room, to: .standalone) }
+                guard let room = rooms.first else { return false }
+                model.move(room: room, to: .standalone)
                 return true
             }
         }
@@ -205,12 +206,16 @@ struct GroupingView: View {
 }
 
 private extension View {
-    /// Accepts dropped rooms into the group coordinated by `coordinatorUUID`.
+    /// Accepts a dropped room into the group coordinated by `coordinatorUUID`.
+    ///
+    /// One room per drop. The list has no multi-selection, so a drag never carries more than
+    /// one - and looping over them would only look like it handled several: the model refuses
+    /// a second move while the first is in flight, so every room after the first was silently
+    /// dropped on the floor.
     func dropTarget(joining coordinatorUUID: String, model: TopologyModel) -> some View {
         dropDestination(for: SonosRoom.self) { rooms, _ in
-            for room in rooms {
-                model.move(room: room, to: .group(coordinatorUUID: coordinatorUUID))
-            }
+            guard let room = rooms.first else { return false }
+            model.move(room: room, to: .group(coordinatorUUID: coordinatorUUID))
             return true
         }
     }
