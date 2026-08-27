@@ -79,9 +79,18 @@ final class PlaybackModel: ObservableObject {
         SonosControl.send(action: .next, to: ip)
     }
 
+    /// Restarts the current track once playback is more than a few seconds in, matching how
+    /// a physical "previous" button behaves; only jumps to the prior track when still near
+    /// the start.
     func previous() {
         guard let ip = coordinatorIP else { return }
+        SonosControl.send(action: .getPositionInfo, to: ip) { data in
+            guard let data, let seconds = SonosControl.relTimeSeconds(from: data), seconds > 3 else {
+                SonosControl.send(action: .previous, to: ip)
+                return
+            }
+            SonosControl.send(action: .seek(target: "0:00:00"), to: ip)
+        }
         generation += 1
-        SonosControl.send(action: .previous, to: ip)
     }
 }

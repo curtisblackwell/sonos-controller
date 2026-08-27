@@ -9,6 +9,11 @@ enum SonosAction: SonosSOAPAction {
     case next
     case previous
     case getTransportInfo
+    case getPositionInfo
+    /// Restarts current track from beginning - `previous()` uses this instead of `.previous`
+    /// once playback is more than a few seconds in, matching how physical transport controls
+    /// on other players behave.
+    case seek(target: String)
     /// Grouping: pointing a player at `x-rincon:<coordinatorUUID>` makes it join that
     /// player's group. Also the normal way to set a playback source.
     case setAVTransportURI(uri: String, metadata: String)
@@ -30,6 +35,8 @@ enum SonosAction: SonosSOAPAction {
         case .next: return "Next"
         case .previous: return "Previous"
         case .getTransportInfo: return "GetTransportInfo"
+        case .getPositionInfo: return "GetPositionInfo"
+        case .seek: return "Seek"
         case .setAVTransportURI: return "SetAVTransportURI"
         case .becomeCoordinatorOfStandaloneGroup: return "BecomeCoordinatorOfStandaloneGroup"
         case .delegateGroupCoordinationTo: return "DelegateGroupCoordinationTo"
@@ -41,8 +48,10 @@ enum SonosAction: SonosSOAPAction {
         switch self {
         case .play:
             return [("Speed", "1")]
-        case .pause, .next, .previous, .getTransportInfo, .becomeCoordinatorOfStandaloneGroup:
+        case .pause, .next, .previous, .getTransportInfo, .getPositionInfo, .becomeCoordinatorOfStandaloneGroup:
             return []
+        case let .seek(target):
+            return [("Unit", "REL_TIME"), ("Target", target)]
         case let .setAVTransportURI(uri, metadata):
             return [("CurrentURI", uri), ("CurrentURIMetaData", metadata)]
         case let .delegateGroupCoordinationTo(newCoordinator, rejoinGroup):
@@ -87,6 +96,14 @@ enum SonosControl {
 
     static func currentTransportState(from data: Data) -> String? {
         SonosSOAP.value(named: "CurrentTransportState", in: data)
+    }
+
+    /// `RelTime` comes back as `H:MM:SS` (or `HH:MM:SS`), never plain seconds.
+    static func relTimeSeconds(from data: Data) -> Int? {
+        guard let relTime = SonosSOAP.value(named: "RelTime", in: data) else { return nil }
+        let parts = relTime.split(separator: ":").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        return parts[0] * 3600 + parts[1] * 60 + parts[2]
     }
 
     /// Toggling needs to know the current state, and there is no "toggle" UPnP action.
