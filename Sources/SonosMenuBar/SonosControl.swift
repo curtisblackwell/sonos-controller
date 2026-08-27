@@ -64,6 +64,16 @@ enum SonosAction: SonosSOAPAction {
 /// `SonosSOAPError` when the transport was shared with the volume services.
 typealias SonosControlError = SonosSOAPError
 
+/// What's playing, as read from `GetPositionInfo`'s `TrackMetaData`. Every field is nil rather
+/// than empty when the source doesn't provide it, so the view can tell "no album" from "not
+/// read yet".
+struct TrackMetadata: Equatable {
+    let title: String?
+    let artist: String?
+    let album: String?
+    let albumArtURL: URL?
+}
+
 enum SonosControl {
     private static let log = Logger(subsystem: "com.curtisblackwell.sonos-controller", category: "control")
 
@@ -98,12 +108,36 @@ enum SonosControl {
         SonosSOAP.value(named: "CurrentTransportState", in: data)
     }
 
-    /// `RelTime` comes back as `H:MM:SS` (or `HH:MM:SS`), never plain seconds.
     static func relTimeSeconds(from data: Data) -> Int? {
-        guard let relTime = SonosSOAP.value(named: "RelTime", in: data) else { return nil }
-        let parts = relTime.split(separator: ":").compactMap { Int($0) }
-        guard parts.count == 3 else { return nil }
-        return parts[0] * 3600 + parts[1] * 60 + parts[2]
+        SonosSOAP.timeSeconds(named: "RelTime", in: data)
+    }
+
+    static func trackDurationSeconds(from data: Data) -> Int? {
+        SonosSOAP.timeSeconds(named: "TrackDuration", in: data)
+    }
+
+    /// Title, artist, album, and album art pulled out of a `GetPositionInfo` response's
+    /// `TrackMetaData` - DIDL-Lite XML, escaped once into the SOAP body.
+    ///
+    /// `coordinatorIP` resolves `upnp:albumArtURI`, which Sonos gives back as a path
+    /// (`/getaa?...`) relative to the player serving the art rather than an absolute URL.
+    static func trackMetadata(from data: Data, coordinatorIP: String) -> TrackMetadata? {
+        guard let raw = SonosSOAP.value(named: "TrackMetaData", in: data), raw != "NOT_IMPLEMENTED" else {
+            return nil
+        }
+        let didl = SonosSOAP.xmlUnescaped(raw)
+        let title = SonosSOAP.value(named: "dc:title", inXML: didl)
+        let artist = SonosSOAP.value(named: "dc:creator", inXML: didl)
+        let album = SonosSOAP.value(named: "upnp:album", inXML: didl)
+        let albumArtURL = SonosSOAP.value(named: "upnp:albumArtURI", inXML: didl).flatMap { uri -> URL? in
+            let unescaped = SonosSOAP.xmlUnescaped(uri)
+            if unescaped.hasPrefix("http://") || unescaped.hasPrefix("https://") {
+                return URL(string: unescaped)
+            }
+            return URL(string: "http://\(coordinatorIP):1400\(unescaped)")
+        }
+        guard title != nil || artist != nil || album != nil || albumArtURL != nil else { return nil }
+        return TrackMetadata(title: title, artist: artist, album: album, albumArtURL: albumArtURL)
     }
 
     /// Toggling needs to know the current state, and there is no "toggle" UPnP action.

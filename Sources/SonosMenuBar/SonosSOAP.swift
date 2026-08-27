@@ -100,6 +100,18 @@ enum SonosSOAP {
         return escaped
     }
 
+    /// `TrackMetaData` comes back as DIDL-Lite XML escaped once into the SOAP body - this
+    /// undoes that so its own tags (`dc:title`, `upnp:albumArtURI`, ...) can be scanned the
+    /// same way `value(named:in:)` scans the outer response.
+    static func xmlUnescaped(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&apos;", with: "'")
+            .replacingOccurrences(of: "&amp;", with: "&")
+    }
+
     /// Completion runs on a URLSession queue, not the main thread - callers that touch UI
     /// state hop for themselves.
     static func send(action: SonosSOAPAction, to ip: String, completion: @escaping (Result<Data, Error>) -> Void) {
@@ -146,5 +158,30 @@ enum SonosSOAP {
 
     static func intValue(named name: String, in data: Data) -> Int? {
         value(named: name, in: data).flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+
+    /// Same flat scan as `value(named:in:)`, over an XML string already in hand - `TrackMetaData`
+    /// arrives as one after `value(named:in:)` and `xmlUnescaped` have already run once.
+    static func value(named name: String, inXML text: String) -> String? {
+        guard let start = text.range(of: "<\(name)>"),
+              let end = text.range(of: "</\(name)>"),
+              start.upperBound <= end.lowerBound
+        else { return nil }
+        return String(text[start.upperBound..<end.lowerBound])
+    }
+
+    /// `RelTime` and `TrackDuration` both come back as `H:MM:SS` (or `HH:MM:SS`), never plain
+    /// seconds.
+    static func timeSeconds(named name: String, in data: Data) -> Int? {
+        guard let text = value(named: name, in: data) else { return nil }
+        let parts = text.split(separator: ":").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    }
+
+    /// The inverse of `timeSeconds(named:in:)`, for building a `Seek` target.
+    static func formatTime(seconds: Int) -> String {
+        let seconds = max(seconds, 0)
+        return String(format: "%d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
     }
 }

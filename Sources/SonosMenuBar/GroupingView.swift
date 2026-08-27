@@ -15,7 +15,7 @@ struct GroupingView: View {
             Divider()
             footer
         }
-        .frame(minWidth: 560, minHeight: 320)
+        .frame(minWidth: 560, minHeight: 360)
         .alert(
             "Grouping Failed",
             isPresented: Binding(
@@ -306,14 +306,149 @@ struct GroupingView: View {
     // MARK: - Footer
 
     private var footer: some View {
-        HStack(spacing: 12) {
-            transportControls
-            if model.isBusy {
-                ProgressView().controlSize(.small)
-                Text("Updating…").foregroundStyle(.secondary).font(.callout)
+        HStack(alignment: .bottom, spacing: 16) {
+            nowPlaying
+            Spacer(minLength: 12)
+            VStack(spacing: 6) {
+                transportControls
+                progressRow
+                householdVolumeRow
             }
-            Spacer()
-            if !model.groups.isEmpty {
+            Spacer(minLength: 12)
+            VStack(alignment: .trailing, spacing: 4) {
+                Spacer()
+                if model.isBusy {
+                    HStack(spacing: 4) {
+                        ProgressView().controlSize(.small)
+                        Text("Updating…").foregroundStyle(.secondary).font(.callout)
+                    }
+                }
+                liveIndicator
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        // Fixed rather than left to size to content, so the footer doesn't grow or shrink
+        // as playback state comes and goes - the transport row above disappears entirely
+        // with no active group, and the row heights alone wouldn't hold the gap open.
+        .frame(height: 84)
+    }
+
+    /// Album art and title/artist/album for whatever `playback` is currently reading. Reads
+    /// as "Nothing Playing" rather than disappearing when there's no active group or no
+    /// track - `PlaybackModel` already reports that as `track == nil`.
+    private var nowPlaying: some View {
+        HStack(spacing: 8) {
+            albumArt
+            VStack(alignment: .leading, spacing: 2) {
+                Text(playback.track?.title ?? "Nothing Playing")
+                    .font(.callout.bold())
+                    .lineLimit(1)
+                Text(playback.track?.artist ?? " ")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(playback.track?.album ?? " ")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var albumArt: some View {
+        RoundedRectangle(cornerRadius: 4)
+            .fill(.quaternary)
+            .frame(width: 54, height: 54)
+            .overlay {
+                if let url = playback.track?.albumArtURL {
+                    AsyncImage(url: url) { image in
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Image(systemName: "music.note").foregroundStyle(.secondary)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                } else {
+                    Image(systemName: "music.note").foregroundStyle(.secondary)
+                }
+            }
+    }
+
+    /// Elapsed time, a seek slider, and time remaining. Degrades on its own when nothing is
+    /// playing - `durationSeconds` stays nil, which disables the slider - so this needs no
+    /// gate of its own.
+    private var progressRow: some View {
+        HStack(spacing: 6) {
+            Text(Self.formatPlaybackTime(playback.elapsedSeconds ?? 0))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .trailing)
+
+            Slider(
+                value: Binding(
+                    get: { Double(playback.elapsedSeconds ?? 0) },
+                    set: { playback.updateSeekDrag(to: Int($0.rounded())) }
+                ),
+                in: 0...Double(max(playback.durationSeconds ?? 0, 1)),
+                onEditingChanged: { editing in
+                    if editing {
+                        playback.beginSeekDrag()
+                    } else {
+                        playback.endSeekDrag(to: playback.elapsedSeconds ?? 0)
+                    }
+                }
+            )
+            .frame(width: 160)
+            .disabled(playback.durationSeconds == nil)
+            .accessibilityLabel("Playback position")
+            .accessibilityValue(playback.elapsedSeconds.map { "\(Self.formatPlaybackTime($0)) elapsed" } ?? "Not known yet")
+
+            Text(remainingLabel)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .leading)
+        }
+    }
+
+    private var remainingLabel: String {
+        guard let duration = playback.durationSeconds else { return "-:--" }
+        return "-" + Self.formatPlaybackTime(max(duration - (playback.elapsedSeconds ?? 0), 0))
+    }
+
+    private static func formatPlaybackTime(_ seconds: Int) -> String {
+        let seconds = max(seconds, 0)
+        if seconds >= 3600 {
+            return String(format: "%d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
+        }
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    /// The household's own volume row, one rung up from `groupVolumeRow`: every room in every
+    /// group, moved in the same proportion. Paired with the same "match to quietest" action a
+    /// group row offers, just aimed at the whole house.
+    @ViewBuilder
+    private var householdVolumeRow: some View {
+        if !model.groups.isEmpty {
+            HStack(spacing: 8) {
+                Text("Whole House")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                volumeControl(
+                    value: volume.volumeForHousehold(),
+                    isMuted: volume.isHouseholdMuted(),
+                    label: "the whole house",
+                    setVolume: { volume.setHouseholdVolume($0) },
+                    toggleMute: { volume.toggleHouseholdMute() },
+                    onEditingChanged: { editing in
+                        if editing {
+                            volume.beginHouseholdDrag()
+                        } else {
+                            volume.endHouseholdDrag()
+                        }
+                    }
+                )
+
                 Button("Match All to Quietest") {
                     volume.syncEverythingToQuietest()
                 }
@@ -321,10 +456,7 @@ struct GroupingView: View {
                 .disabled(volume.isSyncing)
                 .help("Set every speaker in the house to the volume of the quietest one.")
             }
-            liveIndicator
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
 
     /// Only shown once there's an active group to target - matches the star toggle that
