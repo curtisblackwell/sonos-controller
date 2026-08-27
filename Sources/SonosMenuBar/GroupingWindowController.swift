@@ -16,7 +16,7 @@ final class GroupingWindowController: NSWindowController {
         self.volume = volume
         self.playback = playback
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 660, height: 460),
+            contentRect: NSRect(x: 0, y: 0, width: 980, height: 460),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false

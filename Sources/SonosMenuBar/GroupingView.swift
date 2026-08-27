@@ -9,13 +9,29 @@ struct GroupingView: View {
     @ObservedObject var volume: VolumeModel
     @ObservedObject var playback: PlaybackModel
 
+    private static let minWindowWidth: CGFloat = 960
+
+    /// Tracks the window's actual width so the seek slider can scale with it. Starts at the
+    /// window minimum so the very first layout pass - before GeometryReader reports a real
+    /// size - already sizes the slider correctly instead of snapping once it does.
+    @State private var windowWidth: CGFloat = GroupingView.minWindowWidth
+
     var body: some View {
         VStack(spacing: 0) {
             content
             Divider()
             footer
         }
-        .frame(minWidth: 560, minHeight: 360)
+        .frame(minWidth: Self.minWindowWidth, minHeight: 360)
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { windowWidth = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, newWidth in
+                        windowWidth = newWidth
+                    }
+            }
+        }
         .alert(
             "Grouping Failed",
             isPresented: Binding(
@@ -398,7 +414,7 @@ struct GroupingView: View {
                     }
                 }
             )
-            .frame(width: 160)
+            .frame(width: max(400, windowWidth * 2 / 3))
             .disabled(playback.durationSeconds == nil)
             .accessibilityLabel("Playback position")
             .accessibilityValue(playback.elapsedSeconds.map { "\(Self.formatPlaybackTime($0)) elapsed" } ?? "Not known yet")
