@@ -425,15 +425,11 @@ struct GroupingView: View {
 
     /// The household's own volume row, one rung up from `groupVolumeRow`: every room in every
     /// group, moved in the same proportion. Paired with the same "match to quietest" action a
-    /// group row offers, just aimed at the whole house.
+    /// group row offers, just aimed at the whole household.
     @ViewBuilder
     private var householdVolumeRow: some View {
         if !model.groups.isEmpty {
             HStack(spacing: 8) {
-                Text("Whole House")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-
                 volumeControl(
                     value: volume.volumeForHousehold(),
                     isMuted: volume.isHouseholdMuted(),
@@ -449,7 +445,7 @@ struct GroupingView: View {
                     }
                 )
 
-                Button("Match All to Quietest") {
+                Button("Match Quietest") {
                     volume.syncEverythingToQuietest()
                 }
                 .controlSize(.small)
@@ -497,10 +493,15 @@ struct GroupingView: View {
     @ViewBuilder
     private var liveIndicator: some View {
         if model.isReceivingLiveUpdates {
-            Label("Connected to Sonos", systemImage: "dot.radiowaves.left.and.right")
-                .foregroundStyle(.secondary)
-                .font(.callout)
-                .help("Changes made in the Sonos app show up here automatically.")
+            Label {
+                Text("Connected to Sonos")
+                    .foregroundStyle(.secondary)
+            } icon: {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .foregroundStyle(.green)
+            }
+            .font(.callout)
+            .help("Changes made in the Sonos app show up here automatically.")
         } else {
             Label("Reconnecting…", systemImage: "exclamationmark.triangle")
                 .foregroundStyle(.orange)
