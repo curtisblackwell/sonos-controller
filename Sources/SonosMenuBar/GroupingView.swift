@@ -333,7 +333,7 @@ struct GroupingView: View {
     private var transportControls: some View {
         if model.activeGroupID != nil {
             HStack(spacing: 4) {
-                transportButton(systemImage: "backward.fill", help: "Previous Track") {
+                transportButton(systemImage: "backward.end.fill", help: "Previous Track") {
                     playback.previous()
                 }
                 transportButton(
@@ -343,7 +343,7 @@ struct GroupingView: View {
                     playback.togglePlayPause()
                 }
                 .disabled(playback.isPlaying == nil)
-                transportButton(systemImage: "forward.fill", help: "Next Track") {
+                transportButton(systemImage: "forward.end.fill", help: "Next Track") {
                     playback.next()
                 }
             }
