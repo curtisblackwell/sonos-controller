@@ -5,14 +5,25 @@ import SwiftUI
 /// One view rather than one per page, because the rows are the same rows - a `MediaItem` from
 /// a favorite and one from a queue track differ in what they contain, not in what you can do
 /// with them.
-struct MediaListView: View {
-    @ObservedObject var browse: BrowseModel
+struct MediaListView<Model: MediaBrowsing>: View {
+    @ObservedObject var browse: Model
     @ObservedObject var topology: TopologyModel
 
     /// The queue is the one list whose contents the user can edit, so it gets removal actions
-    /// the others have no meaning for.
+    /// the others have no meaning for. Both closures are nil for anything that isn't the queue
+    /// - `BrowsePage` is the only caller that supplies them.
     var showsQueueEditing = false
     var searchPrompt = "Filter"
+    var onClearQueue: (() -> Void)?
+    var onRemoveFromQueue: ((MediaItem) -> Void)?
+    /// Spotify search fetches from the server rather than filtering what's already on screen,
+    /// so it needs to know when the user is done typing rather than live-filtering on every
+    /// keystroke. Nil for every Sonos page, which keeps `browse.filter`'s existing client-side
+    /// behavior.
+    var onFilterSubmit: (() -> Void)?
+    /// Overrides the default "Save something to My Sonos…" copy for a page that isn't Sonos's
+    /// own content - Spotify search has nothing to do with My Sonos.
+    var emptyDescriptionOverride: String?
 
     /// Emptying the queue throws away something the user assembled by hand and Sonos offers no
     /// way back, so it is the one action here that asks first.
@@ -29,7 +40,7 @@ struct MediaListView: View {
             isPresented: $isConfirmingClear,
             titleVisibility: .visible
         ) {
-            Button("Clear Queue", role: .destructive) { browse.clearQueue() }
+            Button("Clear Queue", role: .destructive) { onClearQueue?() }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This can't be undone.")
@@ -81,6 +92,7 @@ struct MediaListView: View {
             TextField(searchPrompt, text: $browse.filter)
                 .textFieldStyle(.plain)
                 .frame(width: 180)
+                .onSubmit { onFilterSubmit?() }
             if !browse.filter.isEmpty {
                 Button {
                     browse.filter = ""
@@ -120,6 +132,7 @@ struct MediaListView: View {
     }
 
     private var emptyDescription: String {
+        if let emptyDescriptionOverride { return emptyDescriptionOverride }
         if showsQueueEditing {
             return "The queue is empty. Play something to fill it."
         }
@@ -212,7 +225,7 @@ struct MediaListView: View {
         }
         if item.queuePosition != nil {
             Divider()
-            Button("Remove from Queue") { browse.removeFromQueue(item) }
+            Button("Remove from Queue") { onRemoveFromQueue?(item) }
         }
     }
 

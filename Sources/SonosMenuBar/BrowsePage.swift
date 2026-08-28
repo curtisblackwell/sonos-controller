@@ -17,7 +17,9 @@ struct BrowsePage: View {
             browse: browse,
             topology: topology,
             showsQueueEditing: showsQueueEditing,
-            searchPrompt: searchPrompt
+            searchPrompt: searchPrompt,
+            onClearQueue: { browse.clearQueue() },
+            onRemoveFromQueue: { browse.removeFromQueue($0) }
         )
         // The model is shared across pages, so it has to be pointed at this page's root both
         // on first appearance and whenever the sidebar switches to a different one. `show` is

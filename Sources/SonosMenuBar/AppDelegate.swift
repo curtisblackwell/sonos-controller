@@ -12,11 +12,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let volume = VolumeModel()
     private let playback = PlaybackModel()
     private let browse = BrowseModel()
+    private let spotifyAuth = SpotifyAuth()
+    private lazy var spotifySearchModel = SpotifySearchModel(auth: spotifyAuth)
     private var permissionPollTimer: Timer?
     /// Every player the last scan found, so a refresh has somewhere to ask without running
     /// another one.
     private var knownDeviceIPs: [String] = []
-    private lazy var mainWindow = MainWindowController(model: topology, volume: volume, playback: playback, browse: browse)
+    private lazy var mainWindow = MainWindowController(
+        model: topology,
+        volume: volume,
+        playback: playback,
+        browse: browse,
+        spotifySearch: spotifySearchModel,
+        spotifyAuth: spotifyAuth
+    )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Before anything reads the saved group - the bundle ID rename moved us to a new
@@ -273,6 +282,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let ip = PreferencesStore.activeGroupCoordinatorIP
         playback.update(coordinatorIP: ip)
         browse.update(coordinatorIP: ip)
+        spotifySearchModel.update(coordinatorIP: ip)
+    }
+
+    /// Spotify's OAuth redirect lands here: `sonos-controller://spotify-auth-callback`, opened
+    /// by the system when the browser finishes the authorize step and Info.plist has
+    /// registered the scheme.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.scheme == "sonos-controller" {
+            spotifyAuth.handleRedirect(url: url)
+        }
     }
 
     private func adjustActiveGroupVolume(by adjustment: Int) {

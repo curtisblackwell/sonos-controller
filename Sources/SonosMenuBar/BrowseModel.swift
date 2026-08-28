@@ -158,3 +158,5 @@ final class BrowseModel: ObservableObject {
         }
     }
 }
+
+extension BrowseModel: MediaBrowsing {}

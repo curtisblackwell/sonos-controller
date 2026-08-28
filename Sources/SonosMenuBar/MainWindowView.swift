@@ -11,6 +11,8 @@ struct MainWindowView: View {
     @ObservedObject var volume: VolumeModel
     @ObservedObject var playback: PlaybackModel
     @ObservedObject var browse: BrowseModel
+    @ObservedObject var spotifySearch: SpotifySearchModel
+    @ObservedObject var spotifyAuth: SpotifyAuth
 
     static let minWindowWidth: CGFloat = 960
 
@@ -48,6 +50,8 @@ struct MainWindowView: View {
                     showsQueueEditing: item == .queue,
                     searchPrompt: "Filter \(item.title)"
                 )
+            } else if item == .spotify {
+                SpotifySearchPage(model: spotifySearch, auth: spotifyAuth, topology: model)
             } else {
                 SpeakersPage(model: model, volume: volume)
             }

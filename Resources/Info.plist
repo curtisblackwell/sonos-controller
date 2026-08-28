@@ -20,6 +20,22 @@
     <string>SonosController finds your Sonos speakers on this network and sends them play, pause, and track commands.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <!-- Substituted by Scripts/build-app.sh from the SPOTIFY_CLIENT_ID environment
+         variable - never hardcoded here, so an open-source checkout never ships someone
+         else's client id. -->
+    <key>SpotifyClientID</key>
+    <string>__SPOTIFY_CLIENT_ID__</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.curtisblackwell.sonos-controller.spotify-auth</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>sonos-controller</string>
+            </array>
+        </dict>
+    </array>
     <!-- Payload for dragging a room between groups in the editor. Declared so the drag
          type is registered rather than synthesised at runtime; it is app-internal and
          deliberately not associated with any file extension. -->

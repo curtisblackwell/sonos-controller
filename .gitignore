@@ -21,6 +21,9 @@ DerivedData/
 *.pem
 *.key
 
+# Per-developer env vars (SPOTIFY_CLIENT_ID, ...), read by Scripts/build-app.sh
+.env
+
 # macOS
 .DS_Store
 ._*

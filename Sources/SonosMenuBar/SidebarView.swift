@@ -9,6 +9,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case queue
     case favorites
     case playlists
+    case spotify
 
     var id: String { rawValue }
 
@@ -18,6 +19,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .queue: return "Queue"
         case .favorites: return "My Sonos"
         case .playlists: return "Sonos Playlists"
+        case .spotify: return "Spotify"
         }
     }
 
@@ -27,13 +29,15 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .queue: return "list.triangle"
         case .favorites: return "star"
         case .playlists: return "music.note.list"
+        case .spotify: return "music.note"
         }
     }
 
-    /// The ObjectID this page browses, or nil for a page that isn't a browse list.
+    /// The ObjectID this page browses, or nil for a page that isn't a Sonos browse list -
+    /// Spotify search is answered by Spotify's own API, not a Sonos player.
     var browseRoot: BrowseModel.Level? {
         switch self {
-        case .speakers:
+        case .speakers, .spotify:
             return nil
         case .queue:
             return BrowseModel.Level(objectID: SonosContentDirectory.ObjectID.queue, title: title)
@@ -57,6 +61,9 @@ struct SidebarView: View {
             Section("Library") {
                 row(.favorites)
                 row(.playlists)
+            }
+            Section("Services") {
+                row(.spotify)
             }
         }
         .listStyle(.sidebar)

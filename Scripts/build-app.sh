@@ -7,13 +7,24 @@ APP_DIR="$ROOT_DIR/$APP_NAME.app"
 BUNDLE_ID="com.curtisblackwell.sonos-controller"
 
 cd "$ROOT_DIR"
+
+# Per-developer config (SPOTIFY_CLIENT_ID, ...) without needing it exported in the shell
+# profile - .env is gitignored, so this stays out of the repo.
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+fi
+
 swift build -c release
 
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
 cp ".build/release/SonosMenuBar" "$APP_DIR/Contents/MacOS/$APP_NAME"
-cp "Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
+
+# SPOTIFY_CLIENT_ID is never committed to Info.plist - it's substituted in here from the
+# environment, empty for anyone who hasn't set one, which just leaves Spotify auth
+# unconfigured rather than shipping a real client id in source.
+sed "s/__SPOTIFY_CLIENT_ID__/${SPOTIFY_CLIENT_ID:-}/" "Resources/Info.plist" > "$APP_DIR/Contents/Info.plist"
 
 # Prefer the stable local dev certificate (see Scripts/setup-dev-cert.sh) over ad-hoc
 # signing - ad-hoc gets a new identity every rebuild, which makes macOS silently drop

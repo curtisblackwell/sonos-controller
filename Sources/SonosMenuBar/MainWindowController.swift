@@ -11,13 +11,24 @@ final class MainWindowController: NSWindowController {
     private let volume: VolumeModel
     private let playback: PlaybackModel
     private let browse: BrowseModel
+    private let spotifySearch: SpotifySearchModel
+    private let spotifyAuth: SpotifyAuth
     private var observers: [NSObjectProtocol] = []
 
-    init(model: TopologyModel, volume: VolumeModel, playback: PlaybackModel, browse: BrowseModel) {
+    init(
+        model: TopologyModel,
+        volume: VolumeModel,
+        playback: PlaybackModel,
+        browse: BrowseModel,
+        spotifySearch: SpotifySearchModel,
+        spotifyAuth: SpotifyAuth
+    ) {
         self.model = model
         self.volume = volume
         self.playback = playback
         self.browse = browse
+        self.spotifySearch = spotifySearch
+        self.spotifyAuth = spotifyAuth
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 980, height: 460),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -26,7 +37,14 @@ final class MainWindowController: NSWindowController {
         )
         window.title = "Sonos"
         window.contentView = NSHostingView(
-            rootView: MainWindowView(model: model, volume: volume, playback: playback, browse: browse)
+            rootView: MainWindowView(
+                model: model,
+                volume: volume,
+                playback: playback,
+                browse: browse,
+                spotifySearch: spotifySearch,
+                spotifyAuth: spotifyAuth
+            )
         )
         // Centre before adopting the autosaved frame: contentRect's origin is (0,0), so a
         // first launch with nothing saved would otherwise put the app's main window in the
