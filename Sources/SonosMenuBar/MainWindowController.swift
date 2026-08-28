@@ -1,32 +1,39 @@
 import AppKit
 import SwiftUI
 
-/// Hosts the grouping editor in a real window.
+/// Hosts the app's main window.
 ///
-/// Also gates the volume polling: the sliders are the only thing that reads volume, so
-/// there is no reason to be asking the household for numbers nobody can see.
-final class GroupingWindowController: NSWindowController {
+/// Also gates the volume and playback polling: the sliders and the now-playing bar are the
+/// only things that read them, so there is no reason to be asking the household for numbers
+/// nobody can see.
+final class MainWindowController: NSWindowController {
     private let model: TopologyModel
     private let volume: VolumeModel
     private let playback: PlaybackModel
+    private let browse: BrowseModel
     private var observers: [NSObjectProtocol] = []
 
-    init(model: TopologyModel, volume: VolumeModel, playback: PlaybackModel) {
+    init(model: TopologyModel, volume: VolumeModel, playback: PlaybackModel, browse: BrowseModel) {
         self.model = model
         self.volume = volume
         self.playback = playback
+        self.browse = browse
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 980, height: 460),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Speaker Groups"
-        window.contentView = NSHostingView(rootView: GroupingView(model: model, volume: volume, playback: playback))
+        window.title = "Sonos"
+        window.contentView = NSHostingView(
+            rootView: MainWindowView(model: model, volume: volume, playback: playback, browse: browse)
+        )
         // Centre before adopting the autosaved frame: contentRect's origin is (0,0), so a
         // first launch with nothing saved would otherwise put the app's main window in the
         // bottom-left corner, behind the Dock.
         window.center()
+        // Still the pre-sidebar name on purpose: this is a UserDefaults key, and renaming it
+        // would throw away the window position and size every existing user has set.
         window.setFrameAutosaveName("GroupingWindow")
         window.isReleasedWhenClosed = false
         super.init(window: window)

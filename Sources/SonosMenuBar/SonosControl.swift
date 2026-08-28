@@ -14,6 +14,9 @@ enum SonosAction: SonosSOAPAction {
     /// once playback is more than a few seconds in, matching how physical transport controls
     /// on other players behave.
     case seek(target: String)
+    /// Jumps to a position in the queue. Same `Seek` action as above but a different unit, so
+    /// the target is a 1-based track number rather than a time.
+    case seekTrack(number: Int)
     /// Grouping: pointing a player at `x-rincon:<coordinatorUUID>` makes it join that
     /// player's group. Also the normal way to set a playback source.
     case setAVTransportURI(uri: String, metadata: String)
@@ -25,6 +28,14 @@ enum SonosAction: SonosSOAPAction {
     /// the old coordinator drops out, which is the only way to remove a coordinator from a
     /// group that should carry on without it.
     case delegateGroupCoordinationTo(newCoordinator: String, rejoinGroup: Bool)
+    /// Puts one track in the queue. `desiredFirstTrackNumber` 0 means "append"; a real
+    /// position inserts there. `enqueueAsNext` inserts after the current track instead.
+    case addURIToQueue(uri: String, metadata: String, desiredFirstTrackNumber: Int, enqueueAsNext: Bool)
+    /// `objectID` is a queue item's own id, `Q:0/<n>`. `updateID` 0 means "whatever the queue
+    /// is now" - Sonos accepts it, and tracking the real value would mean re-reading the queue
+    /// before every removal to guard against a race the user cannot lose in practice.
+    case removeTrackFromQueue(objectID: String, updateID: Int)
+    case removeAllTracksFromQueue
 
     var service: SonosService { .avTransport }
 
@@ -36,10 +47,13 @@ enum SonosAction: SonosSOAPAction {
         case .previous: return "Previous"
         case .getTransportInfo: return "GetTransportInfo"
         case .getPositionInfo: return "GetPositionInfo"
-        case .seek: return "Seek"
+        case .seek, .seekTrack: return "Seek"
         case .setAVTransportURI: return "SetAVTransportURI"
         case .becomeCoordinatorOfStandaloneGroup: return "BecomeCoordinatorOfStandaloneGroup"
         case .delegateGroupCoordinationTo: return "DelegateGroupCoordinationTo"
+        case .addURIToQueue: return "AddURIToQueue"
+        case .removeTrackFromQueue: return "RemoveTrackFromQueue"
+        case .removeAllTracksFromQueue: return "RemoveAllTracksFromQueue"
         }
     }
 
@@ -48,14 +62,26 @@ enum SonosAction: SonosSOAPAction {
         switch self {
         case .play:
             return [("Speed", "1")]
-        case .pause, .next, .previous, .getTransportInfo, .getPositionInfo, .becomeCoordinatorOfStandaloneGroup:
+        case .pause, .next, .previous, .getTransportInfo, .getPositionInfo,
+             .becomeCoordinatorOfStandaloneGroup, .removeAllTracksFromQueue:
             return []
         case let .seek(target):
             return [("Unit", "REL_TIME"), ("Target", target)]
+        case let .seekTrack(number):
+            return [("Unit", "TRACK_NR"), ("Target", String(number))]
         case let .setAVTransportURI(uri, metadata):
             return [("CurrentURI", uri), ("CurrentURIMetaData", metadata)]
         case let .delegateGroupCoordinationTo(newCoordinator, rejoinGroup):
             return [("NewCoordinator", newCoordinator), ("RejoinGroup", rejoinGroup ? "1" : "0")]
+        case let .addURIToQueue(uri, metadata, desiredFirstTrackNumber, enqueueAsNext):
+            return [
+                ("EnqueuedURI", uri),
+                ("EnqueuedURIMetaData", metadata),
+                ("DesiredFirstTrackNumberEnqueued", String(desiredFirstTrackNumber)),
+                ("EnqueueAsNext", enqueueAsNext ? "1" : "0"),
+            ]
+        case let .removeTrackFromQueue(objectID, updateID):
+            return [("ObjectID", objectID), ("UpdateID", String(updateID))]
         }
     }
 }
@@ -120,7 +146,8 @@ enum SonosControl {
     /// `TrackMetaData` - DIDL-Lite XML, escaped once into the SOAP body.
     ///
     /// `coordinatorIP` resolves `upnp:albumArtURI`, which Sonos gives back as a path
-    /// (`/getaa?...`) relative to the player serving the art rather than an absolute URL.
+    /// (`/getaa?...`) relative to the player serving the art rather than an absolute URL -
+    /// shared with the browse lists via `DIDL.artURL`, since both read the same field.
     static func trackMetadata(from data: Data, coordinatorIP: String) -> TrackMetadata? {
         guard let raw = SonosSOAP.value(named: "TrackMetaData", in: data), raw != "NOT_IMPLEMENTED" else {
             return nil
@@ -129,13 +156,10 @@ enum SonosControl {
         let title = SonosSOAP.value(named: "dc:title", inXML: didl)
         let artist = SonosSOAP.value(named: "dc:creator", inXML: didl)
         let album = SonosSOAP.value(named: "upnp:album", inXML: didl)
-        let albumArtURL = SonosSOAP.value(named: "upnp:albumArtURI", inXML: didl).flatMap { uri -> URL? in
-            let unescaped = SonosSOAP.xmlUnescaped(uri)
-            if unescaped.hasPrefix("http://") || unescaped.hasPrefix("https://") {
-                return URL(string: unescaped)
-            }
-            return URL(string: "http://\(coordinatorIP):1400\(unescaped)")
-        }
+        let albumArtURL = DIDL.artURL(
+            from: SonosSOAP.value(named: "upnp:albumArtURI", inXML: didl),
+            coordinatorIP: coordinatorIP
+        )
         guard title != nil || artist != nil || album != nil || albumArtURL != nil else { return nil }
         return TrackMetadata(title: title, artist: artist, album: album, albumArtURL: albumArtURL)
     }

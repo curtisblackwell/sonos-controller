@@ -11,11 +11,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let topologySubscriber = TopologySubscriber()
     private let volume = VolumeModel()
     private let playback = PlaybackModel()
+    private let browse = BrowseModel()
     private var permissionPollTimer: Timer?
     /// Every player the last scan found, so a refresh has somewhere to ask without running
     /// another one.
     private var knownDeviceIPs: [String] = []
-    private lazy var groupingWindow = GroupingWindowController(model: topology, volume: volume, playback: playback)
+    private lazy var mainWindow = MainWindowController(model: topology, volume: volume, playback: playback, browse: browse)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Before anything reads the saved group - the bundle ID rename moved us to a new
@@ -36,13 +37,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         topology.onActiveGroupChanged = { [weak self] in
             self?.statusMenu.refreshActiveGroupMarks()
             self?.refreshVolumeKeyAvailability()
-            self?.playback.update(coordinatorIP: PreferencesStore.activeGroupCoordinatorIP)
+            self?.updateActiveCoordinator()
         }
         statusMenu.onRescanTapped = { [weak self] in
             self?.runDiscovery()
         }
-        statusMenu.onManageGroupsTapped = { [weak self] in
-            self?.groupingWindow.present()
+        statusMenu.onOpenWindowTapped = { [weak self] in
+            self?.mainWindow.present()
         }
 
         // The editor's Refresh button and its post-grouping settle both re-read the topology
@@ -124,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // A .regular app that launches with nothing on screen reads as broken, and the
         // window is the main surface now.
-        groupingWindow.present()
+        mainWindow.present()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -142,7 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Clicking the Dock icon with no window open should bring the editor back rather than
     /// doing nothing.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        if !hasVisibleWindows { groupingWindow.present() }
+        if !hasVisibleWindows { mainWindow.present() }
         return true
     }
 
@@ -262,7 +263,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         topology.update(groups: groups)
         volume.update(groups: groups)
         refreshVolumeKeyAvailability()
-        playback.update(coordinatorIP: PreferencesStore.activeGroupCoordinatorIP)
+        updateActiveCoordinator()
+    }
+
+    /// Both the now-playing bar and the browse lists are addressed to the active group's
+    /// coordinator - playback because that is the player holding the transport, browsing
+    /// because the queue belongs to the coordinator too.
+    private func updateActiveCoordinator() {
+        let ip = PreferencesStore.activeGroupCoordinatorIP
+        playback.update(coordinatorIP: ip)
+        browse.update(coordinatorIP: ip)
     }
 
     private func adjustActiveGroupVolume(by adjustment: Int) {

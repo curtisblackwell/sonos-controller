@@ -12,7 +12,7 @@ final class StatusMenuController: NSObject {
     var onOpenLocalNetworkSettingsTapped: (() -> Void)?
     var onSelectGroup: ((SonosGroup) -> Void)?
     var onRescanTapped: (() -> Void)?
-    var onManageGroupsTapped: (() -> Void)?
+    var onOpenWindowTapped: (() -> Void)?
 
     override init() {
         super.init()
@@ -84,9 +84,9 @@ final class StatusMenuController: NSObject {
         }
 
         menu.addItem(.separator())
-        let manage = NSMenuItem(title: "Manage Groups…", action: #selector(manageGroups), keyEquivalent: "g")
-        manage.target = self
-        menu.addItem(manage)
+        let open = NSMenuItem(title: "Open SonosController", action: #selector(openWindow), keyEquivalent: "o")
+        open.target = self
+        menu.addItem(open)
 
         let rescan = NSMenuItem(title: "Rescan for Speakers", action: #selector(rescan), keyEquivalent: "")
         rescan.target = self
@@ -112,8 +112,8 @@ final class StatusMenuController: NSObject {
         onOpenLocalNetworkSettingsTapped?()
     }
 
-    @objc private func manageGroups() {
-        onManageGroupsTapped?()
+    @objc private func openWindow() {
+        onOpenWindowTapped?()
     }
 
     @objc private func rescan() {
