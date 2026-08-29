@@ -13,10 +13,15 @@ enum SpotifyKeychain {
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
         ]
-        SecItemDelete(query as CFDictionary)
-        var attributes = query
-        attributes[kSecValueData as String] = data
-        SecItemAdd(attributes as CFDictionary, nil)
+        // Update in place when the item already exists so its ACL (and any
+        // "Always Allow" grant) survives - deleting and re-adding wipes the ACL,
+        // which was forcing a fresh keychain prompt on every token refresh.
+        let updateStatus = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if updateStatus == errSecItemNotFound {
+            var attributes = query
+            attributes[kSecValueData as String] = data
+            SecItemAdd(attributes as CFDictionary, nil)
+        }
     }
 
     static func get(_ key: String) -> String? {
