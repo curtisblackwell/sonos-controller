@@ -43,7 +43,7 @@ struct MediaItem: Equatable, Identifiable {
     /// have no need to group.
     let category: Category?
 
-    enum Category: CaseIterable {
+    enum Category: String, CaseIterable {
         case track, album, playlist, followedArtist, topArtist, topTrack
 
         var title: String {

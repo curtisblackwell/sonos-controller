@@ -21,6 +21,7 @@ struct SpotifySearchPage: View {
                         showsArtwork: model.openAlbum == nil,
                         showsFilterField: false,
                         groupsByCategory: model.currentLevel?.objectID == "SPOTIFY:root",
+                        onViewAllCategory: { model.openCategory($0) },
                         emptyDescriptionOverride: "Search for a track, album, or playlist above, then press Return."
                     )
                 }

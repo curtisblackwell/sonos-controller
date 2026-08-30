@@ -26,6 +26,10 @@ struct MediaListView<Model: MediaBrowsing>: View {
     var groupsByCategory = false
     var onClearQueue: (() -> Void)?
     var onRemoveFromQueue: ((MediaItem) -> Void)?
+    /// Set only by the grouped-category grid (Spotify search/home). Nil everywhere else, which
+    /// is also what keeps every category section under `categoryPreviewLimit` from growing a
+    /// "View All" link it has nowhere to send the user.
+    var onViewAllCategory: ((MediaItem.Category) -> Void)?
     /// Spotify search fetches from the server rather than filtering what's already on screen,
     /// so it needs to know when the user is done typing rather than live-filtering on every
     /// keystroke. Nil for every Sonos page, which keeps `browse.filter`'s existing client-side
@@ -151,8 +155,26 @@ struct MediaListView<Model: MediaBrowsing>: View {
                 Text(emptyDescription)
             }
         default:
-            list
+            // The queue is the one list the user reorders and removes from by row, so it keeps
+            // the dense list layout. Everything else that's containers - albums, playlists,
+            // artists - browses better as artwork tiles; a list of tracks (an opened album's or
+            // playlist's songs, "Songs" in a search) reads better as rows than as a wall of
+            // identical note icons, except top tracks, which stay tiled alongside the other home
+            // categories.
+            if showsQueueEditing || (!groupsByCategory && showsAsRows(browse.visibleItems)) {
+                list
+            } else {
+                grid
+            }
         }
+    }
+
+    /// Whether a homogeneous batch of items reads better as list rows than grid tiles: true for
+    /// actual tracks, false for anything the user browses into (and for top tracks, which stay
+    /// tiled with the rest of the home page).
+    private func showsAsRows(_ items: [MediaItem]) -> Bool {
+        guard let first = items.first else { return false }
+        return first.category != .topTrack && !first.isContainer
     }
 
     private var emptyDescription: String {
@@ -187,6 +209,124 @@ struct MediaListView<Model: MediaBrowsing>: View {
                 ProgressView().controlSize(.small).padding(6)
             }
         }
+    }
+
+    private let gridColumns = Array(repeating: GridItem(.flexible(), spacing: 20), count: 5)
+    /// How many items a grouped-category section shows before handing the rest off to "View
+    /// All" - keeps Spotify home/search from stacking dozens of tiles per category on one page.
+    private let categoryPreviewLimit = 10
+
+    private var grid: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 20) {
+                if groupsByCategory {
+                    ForEach(groupedByCategory, id: \.0) { category, items in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text(category.title).font(.headline)
+                                Spacer()
+                                if items.count > categoryPreviewLimit, let onViewAllCategory {
+                                    Button("View All") { onViewAllCategory(category) }
+                                        .buttonStyle(.plain)
+                                        .font(.subheadline)
+                                        .foregroundStyle(Color.accentColor)
+                                }
+                            }
+                            let capped = Array(items.prefix(categoryPreviewLimit))
+                            if showsAsRows(items) {
+                                rowsSection(capped)
+                            } else {
+                                gridSection(capped)
+                            }
+                        }
+                    }
+                } else {
+                    gridSection(browse.visibleItems)
+                }
+                if browse.visibleItems.isEmpty {
+                    Text("Nothing matches “\(browse.filter)”.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(12)
+        }
+        .overlay(alignment: .top) {
+            if browse.isLoading {
+                ProgressView().controlSize(.small).padding(6)
+            }
+        }
+    }
+
+    /// The "Songs" category section rendered as plain rows rather than tiles - reuses the same
+    /// `row(_:)` a `List` would, just laid out in a `VStack` since it sits inside the grid
+    /// page's `ScrollView` alongside tiled sections rather than owning the whole page.
+    private func rowsSection(_ items: [MediaItem]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(items) { item in
+                row(item)
+                    .padding(.vertical, 4)
+                if item.id != items.last?.id {
+                    Divider()
+                }
+            }
+        }
+    }
+
+    private func gridSection(_ items: [MediaItem]) -> some View {
+        LazyVGrid(columns: gridColumns, spacing: 16) {
+            ForEach(items) { item in gridCell(item) }
+        }
+    }
+
+    private func gridCell(_ item: MediaItem) -> some View {
+        VStack(spacing: 6) {
+            gridArtwork(item)
+            VStack(spacing: 1) {
+                Text(item.displayTitle)
+                    .font(.caption)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                if let subtitle = item.subtitle {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(.rect)
+        .onTapGesture(count: 2) { activate(item) }
+        .contextMenu { menu(for: item) }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private func gridArtwork(_ item: MediaItem) -> some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(.quaternary)
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                if let url = item.artURL {
+                    AsyncImage(url: url) { image in
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        placeholderIcon(item)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                } else {
+                    placeholderIcon(item)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(alignment: .topTrailing) {
+                if item.canExpand {
+                    Image(systemName: "chevron.right.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.white, .black.opacity(0.5))
+                        .padding(4)
+                }
+            }
     }
 
     /// Rows bucketed by `category` in `MediaItem.Category`'s fixed order (songs, then albums,

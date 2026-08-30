@@ -56,6 +56,11 @@ final class SpotifySearchModel: ObservableObject {
 
     @Published private(set) var openAlbum: AlbumHeader?
 
+    /// The full (unpaged) list behind whichever "View All \(category)" page is currently open -
+    /// restored on `pop(to:)` rather than re-fetched, since it isn't backed by a real Spotify
+    /// container `Browse`/`Browse` can ask for again. `nil` outside a View All page.
+    private var viewAllItems: [MediaItem]?
+
     init(auth: SpotifyAuth, metadataCache: SpotifyQueuedTrackCache) {
         self.auth = auth
         self.metadataCache = metadataCache
@@ -187,14 +192,31 @@ final class SpotifySearchModel: ObservableObject {
         loadContainer(id: item.id)
     }
 
+    /// One category's items, capped at `MediaListView`'s per-section preview count on the home
+    /// or search grid, expanded to every already-fetched item of that category. Not a new
+    /// server fetch: Spotify's own `/search` results are the entire result set already (capped
+    /// at its own limit), and the home sections were already fetched at a higher limit than the
+    /// grid previews - see `MediaListView.categoryPreviewLimit`.
+    func openCategory(_ category: MediaItem.Category) {
+        let filtered = (items ?? []).filter { $0.category == category }
+        viewAllItems = filtered
+        path.append(BrowseModel.Level(objectID: "SPOTIFY:viewall:\(category.rawValue)", title: category.title))
+        items = filtered
+    }
+
     func pop(to index: Int) {
         guard index >= 0, index < path.count, index != path.count - 1 else { return }
         path = Array(path.prefix(index + 1))
-        if let level = currentLevel, level.objectID != Self.rootLevel.objectID {
-            loadContainer(id: level.objectID)
-        } else {
+        guard let level = currentLevel, level.objectID != Self.rootLevel.objectID else {
             openAlbum = nil
+            viewAllItems = nil
             search()
+            return
+        }
+        if level.objectID.hasPrefix("SPOTIFY:viewall:") {
+            items = viewAllItems ?? []
+        } else {
+            loadContainer(id: level.objectID)
         }
     }
 
