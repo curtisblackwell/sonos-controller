@@ -103,14 +103,7 @@ struct HeaderBar: View {
     @ViewBuilder
     private var householdVolumeRow: some View {
         if !model.groups.isEmpty {
-            HStack(spacing: 8) {
-                Button("Match Quietest") {
-                    volume.syncEverythingToQuietest()
-                }
-                .controlSize(.small)
-                .disabled(volume.isSyncing)
-                .help("Set every speaker in the house to the volume of the quietest one.")
-
+            VStack(alignment: .trailing, spacing: 6) {
                 VolumeSlider(
                     value: volume.volumeForHousehold(),
                     isMuted: volume.isHouseholdMuted(),
@@ -125,6 +118,13 @@ struct HeaderBar: View {
                         }
                     }
                 )
+
+                Button("Match Quietest") {
+                    volume.syncEverythingToQuietest()
+                }
+                .controlSize(.small)
+                .disabled(volume.isSyncing)
+                .help("Set every speaker in the house to the volume of the quietest one.")
             }
         }
     }
