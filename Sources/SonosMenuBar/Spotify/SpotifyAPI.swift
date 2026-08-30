@@ -14,9 +14,9 @@ enum SpotifyAPIError: LocalizedError {
 }
 
 /// Read-only access to the pieces of Spotify's Web API this app browses: search, the user's
-/// own playlists and saved albums, and the tracks inside one. Takes a `SpotifyAuth` rather than
-/// reaching for a shared instance, the same way `SonosSOAP.send` takes the IP to talk to rather
-/// than assuming a single household.
+/// own playlists, saved albums, followed/top artists, top tracks, and the tracks or albums
+/// inside one of those. Takes a `SpotifyAuth` rather than reaching for a shared instance, the
+/// same way `SonosSOAP.send` takes the IP to talk to rather than assuming a single household.
 enum SpotifyAPI {
     private static let log = Logger(subsystem: "com.curtisblackwell.sonos-controller", category: "spotify-api")
     private static let base = "https://api.spotify.com/v1"
@@ -35,6 +35,13 @@ enum SpotifyAPI {
             URLQueryItem(name: "limit", value: "10"),
         ]
         get(components.url!, auth: auth, completion: completion)
+    }
+
+    static func me(
+        auth: SpotifyAuth,
+        completion: @escaping (Result<SpotifyModels.User, Error>) -> Void
+    ) {
+        get(URL(string: "\(base)/me")!, auth: auth, completion: completion)
     }
 
     static func myPlaylists(
@@ -56,7 +63,9 @@ enum SpotifyAPI {
         auth: SpotifyAuth,
         completion: @escaping (Result<SpotifyModels.Paging<SpotifyModels.PlaylistTrackItem>, Error>) -> Void
     ) {
-        get(URL(string: "\(base)/playlists/\(id)/tracks?limit=50")!, auth: auth, completion: completion)
+        // `/tracks` is deprecated and returns 403 for apps in Development Mode as of Spotify's
+        // February 2026 migration - `/items` is the replacement, same response shape.
+        get(URL(string: "\(base)/playlists/\(id)/items?limit=50")!, auth: auth, completion: completion)
     }
 
     static func albumTracks(
@@ -65,6 +74,37 @@ enum SpotifyAPI {
         completion: @escaping (Result<SpotifyModels.Paging<SpotifyModels.Track>, Error>) -> Void
     ) {
         get(URL(string: "\(base)/albums/\(id)/tracks?limit=50")!, auth: auth, completion: completion)
+    }
+
+    static func artistAlbums(
+        id: String,
+        auth: SpotifyAuth,
+        completion: @escaping (Result<SpotifyModels.Paging<SpotifyModels.Album>, Error>) -> Void
+    ) {
+        // Max `limit` for this endpoint dropped from 50 to 10 in Spotify's February 2026
+        // Development Mode migration - 50 now fails with 400 "Invalid limit".
+        get(URL(string: "\(base)/artists/\(id)/albums?limit=10")!, auth: auth, completion: completion)
+    }
+
+    static func topArtists(
+        auth: SpotifyAuth,
+        completion: @escaping (Result<SpotifyModels.Paging<SpotifyModels.Artist>, Error>) -> Void
+    ) {
+        get(URL(string: "\(base)/me/top/artists?limit=50")!, auth: auth, completion: completion)
+    }
+
+    static func topTracks(
+        auth: SpotifyAuth,
+        completion: @escaping (Result<SpotifyModels.Paging<SpotifyModels.Track>, Error>) -> Void
+    ) {
+        get(URL(string: "\(base)/me/top/tracks?limit=50")!, auth: auth, completion: completion)
+    }
+
+    static func following(
+        auth: SpotifyAuth,
+        completion: @escaping (Result<SpotifyModels.FollowedArtistsResponse, Error>) -> Void
+    ) {
+        get(URL(string: "\(base)/me/following?type=artist&limit=50")!, auth: auth, completion: completion)
     }
 
     /// Seconds to wait before retrying a 429. Spotify always sends `Retry-After`, but a missing

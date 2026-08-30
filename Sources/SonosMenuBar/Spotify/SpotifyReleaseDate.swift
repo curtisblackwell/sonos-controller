@@ -17,6 +17,16 @@ enum SpotifyReleaseDate {
         return "\(year) \(monthName) \(ordinal(day))"
     }
 
+    /// A zero-padded `"YYYY-MM-DD"` key so two release dates at different precisions
+    /// (`"2026"` vs `"2026-03"`) still compare correctly by string order.
+    static func sortKey(_ raw: String) -> String {
+        let parts = raw.split(separator: "-").map(String.init)
+        let year = parts.first ?? "0000"
+        let month = parts.count >= 2 ? parts[1] : "01"
+        let day = parts.count >= 3 ? parts[2] : "01"
+        return "\(year)-\(month)-\(day)"
+    }
+
     private static func ordinal(_ day: Int) -> String {
         switch (day % 10, day % 100) {
         case (1, let hundreds) where hundreds != 11: return "\(day)st"

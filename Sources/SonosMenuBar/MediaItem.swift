@@ -44,13 +44,16 @@ struct MediaItem: Equatable, Identifiable {
     let category: Category?
 
     enum Category: CaseIterable {
-        case track, album, playlist
+        case track, album, playlist, followedArtist, topArtist, topTrack
 
         var title: String {
             switch self {
             case .track: return "Songs"
             case .album: return "Albums"
             case .playlist: return "Playlists"
+            case .followedArtist: return "Following"
+            case .topArtist: return "Top Artists"
+            case .topTrack: return "Top Tracks"
             }
         }
     }

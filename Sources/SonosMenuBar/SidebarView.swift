@@ -51,11 +51,16 @@ enum SidebarItem: String, CaseIterable, Identifiable {
 
 struct SidebarView: View {
     @Binding var selection: SidebarItem?
+    @ObservedObject var spotifyAuth: SpotifyAuth
 
     var body: some View {
         List(selection: $selection) {
             Section("Library") {
                 row(.spotify)
+                    .contextMenu {
+                        Button("Sign Out") { spotifyAuth.signOut() }
+                            .disabled(!spotifyAuth.isAuthenticated)
+                    }
                 row(.favorites)
                 row(.playlists)
             }

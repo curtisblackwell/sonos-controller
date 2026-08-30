@@ -33,7 +33,7 @@ struct MainWindowView: View {
             )
             Divider()
             HStack(spacing: 0) {
-                SidebarView(selection: $selection)
+                SidebarView(selection: $selection, spotifyAuth: spotifyAuth)
                     .frame(width: 200)
                 Divider()
                 detail

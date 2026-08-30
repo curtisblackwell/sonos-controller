@@ -24,6 +24,7 @@ struct SpotifySearchPage: View {
                         emptyDescriptionOverride: "Search for a track, album, or playlist above, then press Return."
                     )
                 }
+                .onAppear { model.showHomeIfAtRoot() }
             } else {
                 connectPrompt
             }

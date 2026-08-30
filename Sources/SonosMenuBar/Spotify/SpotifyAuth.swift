@@ -9,11 +9,12 @@ import os.log
 /// secret.
 ///
 /// Scoped to browsing only (`playlist-read-private playlist-read-collaborative
-/// user-library-read`): this app never plays anything through Spotify itself, Sonos does, so
-/// there is nothing here that needs a playback scope.
+/// user-library-read user-top-read user-follow-read`): this app never plays anything through
+/// Spotify itself, Sonos does, so there is nothing here that needs a playback scope.
 final class SpotifyAuth: ObservableObject {
     private static let log = Logger(subsystem: "com.curtisblackwell.sonos-controller", category: "spotify-auth")
-    private static let scopes = "playlist-read-private playlist-read-collaborative user-library-read"
+    private static let scopes =
+        "playlist-read-private playlist-read-collaborative user-library-read user-top-read user-follow-read"
 
     private enum KeychainKey {
         static let accessToken = "accessToken"

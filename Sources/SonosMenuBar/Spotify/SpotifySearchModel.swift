@@ -34,6 +34,13 @@ final class SpotifySearchModel: ObservableObject {
     private var credentials: (sid: Int, sn: String)?
     private var didAttemptCredentialDiscovery = false
 
+    /// The signed-in user's own Spotify id, needed to tell an owned/collaborative playlist
+    /// (openable) from one merely followed (403s on `/items` in Development Mode) - see
+    /// `isListable`. `nil` after a completed attempt means the lookup failed, not that it
+    /// hasn't happened yet.
+    private var userID: String?
+    private var didAttemptUserIDFetch = false
+
     /// Art/title for whichever album or playlist is currently open, so its tracks can show art
     /// even when Spotify's own "tracks of an album" response omits the album object.
     private var openContainerArt: URL?
@@ -71,7 +78,7 @@ final class SpotifySearchModel: ObservableObject {
         path = [Self.rootLevel]
         openAlbum = nil
         guard !query.isEmpty else {
-            items = []
+            loadHome()
             return
         }
         generation += 1
@@ -79,20 +86,89 @@ final class SpotifySearchModel: ObservableObject {
         isLoading = true
         items = nil
 
-        withCredentials { [weak self] in
+        withUserID { [weak self] in
             guard let self else { return }
-            SpotifyAPI.search(query: query, auth: self.auth) { result in
-                DispatchQueue.main.async {
+            self.withCredentials { [weak self] in
+                guard let self else { return }
+                SpotifyAPI.search(query: query, auth: self.auth) { result in
+                    DispatchQueue.main.async {
+                        guard requestGeneration == self.generation else { return }
+                        self.isLoading = false
+                        switch result {
+                        case let .success(response):
+                            self.items = self.mediaItems(from: response)
+                        case let .failure(error):
+                            Self.log.error("Spotify search failed: \(error.localizedDescription, privacy: .public)")
+                            self.items = []
+                            self.errorMessage = "Couldn't search Spotify: \(error.localizedDescription)"
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Home
+
+    /// Called from the page's `.onAppear` - reloads the home sections only when there's a home
+    /// to show, so reappearing mid-search or mid-browse doesn't clobber where the user is.
+    func showHomeIfAtRoot() {
+        guard path.count == 1, filter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        loadHome()
+    }
+
+    /// The Spotify root's default view once there's no search query: the user's own library at
+    /// a glance. All four fetches run together rather than one after another - nothing here
+    /// depends on another's result - and land in one `items` update rather than one per
+    /// endpoint, so the list doesn't visibly assemble section by section.
+    private func loadHome() {
+        generation += 1
+        let requestGeneration = generation
+        isLoading = true
+        items = nil
+
+        withUserID { [weak self] in
+            guard let self else { return }
+            self.withCredentials { [weak self] in
+                guard let self else { return }
+                var playlists: [MediaItem] = []
+                var following: [MediaItem] = []
+                var topArtists: [MediaItem] = []
+                var topTracks: [MediaItem] = []
+                let group = DispatchGroup()
+
+                group.enter()
+                SpotifyAPI.myPlaylists(auth: self.auth) { result in
+                    if case let .success(page) = result {
+                        playlists = page.items.filter(self.isListable).map { self.mediaItem(from: $0) }
+                    }
+                    group.leave()
+                }
+                group.enter()
+                SpotifyAPI.following(auth: self.auth) { result in
+                    if case let .success(response) = result {
+                        following = response.artists.items.map { self.mediaItem(from: $0, category: .followedArtist) }
+                    }
+                    group.leave()
+                }
+                group.enter()
+                SpotifyAPI.topArtists(auth: self.auth) { result in
+                    if case let .success(page) = result {
+                        topArtists = page.items.map { self.mediaItem(from: $0, category: .topArtist) }
+                    }
+                    group.leave()
+                }
+                group.enter()
+                SpotifyAPI.topTracks(auth: self.auth) { result in
+                    if case let .success(page) = result {
+                        topTracks = page.items.map { self.mediaItem(from: $0, category: .topTrack) }
+                    }
+                    group.leave()
+                }
+                group.notify(queue: .main) {
                     guard requestGeneration == self.generation else { return }
                     self.isLoading = false
-                    switch result {
-                    case let .success(response):
-                        self.items = self.mediaItems(from: response)
-                    case let .failure(error):
-                        Self.log.error("Spotify search failed: \(error.localizedDescription, privacy: .public)")
-                        self.items = []
-                        self.errorMessage = "Couldn't search Spotify: \(error.localizedDescription)"
-                    }
+                    self.items = playlists + following + topArtists + topTracks
                 }
             }
         }
@@ -130,13 +206,13 @@ final class SpotifySearchModel: ObservableObject {
 
         withCredentials { [weak self] in
             guard let self else { return }
-            let completion: (Result<[SpotifyModels.Track], Error>) -> Void = { result in
+            let completion: (Result<[MediaItem], Error>) -> Void = { result in
                 DispatchQueue.main.async {
                     guard requestGeneration == self.generation else { return }
                     self.isLoading = false
                     switch result {
-                    case let .success(tracks):
-                        self.items = tracks.map { self.mediaItem(from: $0) }
+                    case let .success(mediaItems):
+                        self.items = mediaItems
                     case let .failure(error):
                         Self.log.error("Spotify container fetch failed: \(error.localizedDescription, privacy: .public)")
                         self.items = []
@@ -146,11 +222,22 @@ final class SpotifySearchModel: ObservableObject {
             }
             if id.hasPrefix("SPOTIFY:album:") {
                 let spotifyID = String(id.dropFirst("SPOTIFY:album:".count))
-                SpotifyAPI.albumTracks(id: spotifyID, auth: self.auth) { completion($0.map(\.items)) }
+                SpotifyAPI.albumTracks(id: spotifyID, auth: self.auth) { result in
+                    completion(result.map { $0.items.map { self.mediaItem(from: $0) } })
+                }
             } else if id.hasPrefix("SPOTIFY:playlist:") {
                 let spotifyID = String(id.dropFirst("SPOTIFY:playlist:".count))
                 SpotifyAPI.playlistItems(id: spotifyID, auth: self.auth) { result in
-                    completion(result.map { $0.items.compactMap(\.track) })
+                    completion(result.map { $0.items.compactMap(\.item).map { self.mediaItem(from: $0) } })
+                }
+            } else if id.hasPrefix("SPOTIFY:artist:") {
+                let spotifyID = String(id.dropFirst("SPOTIFY:artist:".count))
+                SpotifyAPI.artistAlbums(id: spotifyID, auth: self.auth) { result in
+                    completion(result.map { page in
+                        page.items
+                            .sorted { SpotifyReleaseDate.sortKey($0.release_date ?? "") > SpotifyReleaseDate.sortKey($1.release_date ?? "") }
+                            .map { self.mediaItem(from: $0) }
+                    })
                 }
             }
         }
@@ -215,6 +302,33 @@ final class SpotifySearchModel: ObservableObject {
         scanForCredentials(roots: roots, index: 0, ip: ip, then: then)
     }
 
+    /// Fetched once per app launch, same caching shape as `withCredentials`. Runs `then` either
+    /// way - a failed lookup just means every playlist filters out as unlistable rather than
+    /// blocking browsing entirely.
+    private func withUserID(then: @escaping () -> Void) {
+        guard !didAttemptUserIDFetch, userID == nil else {
+            then()
+            return
+        }
+        SpotifyAPI.me(auth: auth) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if case let .success(user) = result {
+                    self.userID = user.id
+                }
+                self.didAttemptUserIDFetch = true
+                then()
+            }
+        }
+    }
+
+    /// Development Mode's `/playlists/{id}/items` 403s for any playlist the user neither owns
+    /// nor collaborates on (see `Playlist.collaborative`'s doc comment) - filtered out here
+    /// rather than left to fail when opened.
+    private func isListable(_ playlist: SpotifyModels.Playlist) -> Bool {
+        playlist.collaborative || (userID != nil && playlist.owner?.id == userID)
+    }
+
     private func scanForCredentials(roots: [String], index: Int, ip: String, then: @escaping () -> Void) {
         guard index < roots.count else {
             DispatchQueue.main.async { [weak self] in
@@ -245,11 +359,11 @@ final class SpotifySearchModel: ObservableObject {
     private func mediaItems(from response: SpotifyModels.SearchResponse) -> [MediaItem] {
         let tracks = (response.tracks?.items ?? []).compactMap { $0 }.map { mediaItem(from: $0) }
         let albums = (response.albums?.items ?? []).compactMap { $0 }.map { mediaItem(from: $0) }
-        let playlists = (response.playlists?.items ?? []).compactMap { $0 }.map { mediaItem(from: $0) }
+        let playlists = (response.playlists?.items ?? []).compactMap { $0 }.filter(isListable).map { mediaItem(from: $0) }
         return tracks + albums + playlists
     }
 
-    private func mediaItem(from track: SpotifyModels.Track) -> MediaItem {
+    private func mediaItem(from track: SpotifyModels.Track, category: MediaItem.Category = .track) -> MediaItem {
         let artURL = track.album?.images?.first.flatMap { URL(string: $0.url) } ?? openContainerArt
         var playURI: String?
         if let credentials {
@@ -264,7 +378,7 @@ final class SpotifySearchModel: ObservableObject {
             playURI: playURI,
             isContainer: false,
             canExpand: false,
-            category: .track
+            category: category
         )
         // However this track ends up queued - a direct play, "Play Next", or a whole album -
         // this is the one point every track passes through, so it's remembered here rather
@@ -295,6 +409,19 @@ final class SpotifySearchModel: ObservableObject {
             isContainer: true,
             canExpand: true,
             category: .playlist
+        )
+    }
+
+    /// No `playURI`: there's no artist-level Sonos URI (see `SpotifyURIBuilder`'s doc comment),
+    /// so an artist row is a container the user can open into their albums, never play directly.
+    private func mediaItem(from artist: SpotifyModels.Artist, category: MediaItem.Category) -> MediaItem {
+        MediaItem(
+            id: "SPOTIFY:artist:\(artist.id)",
+            title: artist.name,
+            artURL: artist.images?.first.flatMap { URL(string: $0.url) },
+            isContainer: true,
+            canExpand: true,
+            category: category
         )
     }
 }
