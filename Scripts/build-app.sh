@@ -40,3 +40,5 @@ fi
 codesign --force --sign "$SIGN_IDENTITY" --identifier "$BUNDLE_ID" "$APP_DIR"
 
 echo "Built $APP_DIR (signed with: $SIGN_IDENTITY)"
+
+open $APP_DIR
