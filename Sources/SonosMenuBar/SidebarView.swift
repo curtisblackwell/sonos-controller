@@ -54,16 +54,14 @@ struct SidebarView: View {
 
     var body: some View {
         List(selection: $selection) {
-            Section("System") {
-                row(.speakers)
-                row(.queue)
-            }
             Section("Library") {
+                row(.spotify)
                 row(.favorites)
                 row(.playlists)
             }
-            Section("Services") {
-                row(.spotify)
+            Section("System") {
+                row(.speakers)
+                row(.queue)
             }
         }
         .listStyle(.sidebar)
