@@ -4,6 +4,7 @@ enum PreferencesStore {
     private static let idKey = "activeGroupID"
     private static let nameKey = "activeGroupDisplayName"
     private static let ipKey = "activeGroupCoordinatorIP"
+    private static let sidebarKey = "selectedSidebarItem"
 
     /// The bundle identifier before it was corrected to `com.curtisblackwell.*`. Renaming it
     /// moved the app to a fresh `UserDefaults` domain, so anyone who ran a build from before
@@ -40,6 +41,16 @@ enum PreferencesStore {
     static var activeGroupCoordinatorIP: String? {
         get { UserDefaults.standard.string(forKey: ipKey) }
         set { UserDefaults.standard.set(newValue, forKey: ipKey) }
+    }
+
+    /// The page the window was last showing. Falls back to Speakers for a fresh install, and
+    /// for a stored value that no longer names a page.
+    static var selectedSidebarItem: SidebarItem {
+        get {
+            UserDefaults.standard.string(forKey: sidebarKey)
+                .flatMap(SidebarItem.init(rawValue:)) ?? .speakers
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: sidebarKey) }
     }
 
     /// Used when the saved group no longer exists in a freshly fetched topology - leaving

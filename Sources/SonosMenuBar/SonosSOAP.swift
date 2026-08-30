@@ -30,6 +30,22 @@ struct SonosService {
         controlPath: "/MediaRenderer/GroupRenderingControl/Control"
     )
 
+    /// The household's content: favorites, Sonos playlists, the queue, the local library
+    /// index. Lives on the MediaServer half of the player rather than the MediaRenderer, and
+    /// - unlike the three above - its actions take no `InstanceID`.
+    static let contentDirectory = SonosService(
+        type: "urn:schemas-upnp-org:service:ContentDirectory:1",
+        controlPath: "/MediaServer/ContentDirectory/Control"
+    )
+
+    /// Which music services exist, and what numeric id each one has. Needed because a
+    /// service id is not a constant: it varies by region and account, so anything that builds
+    /// a service URI has to look it up rather than hardcode it.
+    static let musicServices = SonosService(
+        type: "urn:schemas-upnp-org:service:MusicServices:1",
+        controlPath: "/MusicServices/Control"
+    )
+
     func controlURL(ip: String) -> URL? {
         URL(string: "http://\(ip):1400\(controlPath)")
     }
@@ -42,6 +58,14 @@ protocol SonosSOAPAction {
     var service: SonosService { get }
     var name: String { get }
     var arguments: [(name: String, value: String)] { get }
+    /// Whether `InstanceID` leads the argument list. True for the three MediaRenderer
+    /// services, where every action takes it; false for ContentDirectory and MusicServices,
+    /// which reject it.
+    var includesInstanceID: Bool { get }
+}
+
+extension SonosSOAPAction {
+    var includesInstanceID: Bool { true }
 }
 
 enum SonosSOAPError: LocalizedError {
@@ -67,17 +91,19 @@ enum SonosSOAP {
     /// minute, which is long enough for anything serialized behind it to look like a hang.
     static let requestTimeout: TimeInterval = 5
 
-    /// `InstanceID` 0 is hardcoded because every action on all three of these services takes
+    /// `InstanceID` 0 is hardcoded because every action on the MediaRenderer services takes
     /// it first and Sonos has exactly one instance per player - there is no second value it
-    /// could ever be.
+    /// could ever be. ContentDirectory and MusicServices don't take it at all, and say so by
+    /// returning false from `includesInstanceID`.
     static func envelope(action: SonosSOAPAction) -> String {
+        let instance = action.includesInstanceID ? "<InstanceID>0</InstanceID>" : ""
         let extra = action.arguments
             .map { "<\($0.name)>\(xmlEscaped($0.value))</\($0.name)>" }
             .joined()
         return """
         <?xml version="1.0" encoding="utf-8"?>
         <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-        <s:Body><u:\(action.name) xmlns:u="\(action.service.type)"><InstanceID>0</InstanceID>\(extra)</u:\(action.name)></s:Body>
+        <s:Body><u:\(action.name) xmlns:u="\(action.service.type)">\(instance)\(extra)</u:\(action.name)></s:Body>
         </s:Envelope>
         """
     }

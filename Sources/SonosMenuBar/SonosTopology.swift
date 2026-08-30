@@ -56,11 +56,11 @@ enum SonosTopology {
     /// Pulls the `ZoneGroupState` element's text out of whatever wrapper it arrived in.
     /// XMLParser hands text back already unescaped once, which is usually enough.
     private static func extractZoneGroupState(from data: Data) -> String {
-        let extractor = ZoneGroupStateExtractor()
+        let extractor = ElementTextExtractor(elementName: "ZoneGroupState")
         let parser = XMLParser(data: data)
         parser.delegate = extractor
         guard parser.parse() else { return "" }
-        return extractor.zoneGroupStateXML
+        return extractor.text
     }
 
     private static func parseGroups(zoneGroupStateXML: String) -> [SonosGroup] {
@@ -109,26 +109,6 @@ enum SonosTopology {
         groups
             .flatMap(\.members)
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-    }
-}
-
-/// Pulls the (HTML-entity-escaped) inner topology XML out of the SOAP response body.
-/// XMLParser hands us already-unescaped text via foundCharacters, which is exactly
-/// the raw <ZoneGroups>...</ZoneGroups> document we need to parse next.
-private final class ZoneGroupStateExtractor: NSObject, XMLParserDelegate {
-    private(set) var zoneGroupStateXML = ""
-    private var capturing = false
-
-    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
-        if elementName == "ZoneGroupState" { capturing = true }
-    }
-
-    func parser(_ parser: XMLParser, foundCharacters string: String) {
-        if capturing { zoneGroupStateXML += string }
-    }
-
-    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
-        if elementName == "ZoneGroupState" { capturing = false }
     }
 }
 
