@@ -17,6 +17,10 @@ struct MediaListView<Model: MediaBrowsing>: View {
     /// art once, so repeating it on every row is redundant.
     var showsArtwork = true
     var searchPrompt = "Filter"
+    /// Sections rows under "Songs"/"Albums"/"Playlists" headers instead of one flat list -
+    /// meaningful only for Spotify search, whose rows carry a `category`. Sonos browse lists
+    /// leave `category` `nil` on every row, which collapses back to the flat list either way.
+    var groupsByCategory = false
     var onClearQueue: (() -> Void)?
     var onRemoveFromQueue: ((MediaItem) -> Void)?
     /// Spotify search fetches from the server rather than filtering what's already on screen,
@@ -144,8 +148,16 @@ struct MediaListView<Model: MediaBrowsing>: View {
 
     private var list: some View {
         List {
-            ForEach(browse.visibleItems) { item in
-                row(item)
+            if groupsByCategory {
+                ForEach(groupedByCategory, id: \.0) { category, items in
+                    Section(category.title) {
+                        ForEach(items) { item in row(item) }
+                    }
+                }
+            } else {
+                ForEach(browse.visibleItems) { item in
+                    row(item)
+                }
             }
             if browse.visibleItems.isEmpty {
                 Text("Nothing matches “\(browse.filter)”.")
@@ -157,6 +169,18 @@ struct MediaListView<Model: MediaBrowsing>: View {
             if browse.isLoading {
                 ProgressView().controlSize(.small).padding(6)
             }
+        }
+    }
+
+    /// Rows bucketed by `category` in `MediaItem.Category`'s fixed order (songs, then albums,
+    /// then playlists) rather than a `Dictionary` grouping, which wouldn't preserve that order.
+    /// A row with no category (every non-Spotify-search list) falls out of every bucket, so this
+    /// is only ever non-empty when `groupsByCategory` is set.
+    private var groupedByCategory: [(MediaItem.Category, [MediaItem])] {
+        let items = browse.visibleItems
+        return MediaItem.Category.allCases.compactMap { category in
+            let matches = items.filter { $0.category == category }
+            return matches.isEmpty ? nil : (category, matches)
         }
     }
 

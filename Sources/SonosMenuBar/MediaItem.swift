@@ -38,6 +38,22 @@ struct MediaItem: Equatable, Identifiable {
     /// The music service id from `playURI`'s query, when there is one. `nil` for local
     /// library content and for the queue's own container.
     let serviceID: Int?
+    /// What kind of result this is, for search results grouped by category. `nil` for anything
+    /// that isn't a search result - Sonos browse lists don't mix kinds within one list, so they
+    /// have no need to group.
+    let category: Category?
+
+    enum Category: CaseIterable {
+        case track, album, playlist
+
+        var title: String {
+            switch self {
+            case .track: return "Songs"
+            case .album: return "Albums"
+            case .playlist: return "Playlists"
+            }
+        }
+    }
 
     init(
         id: String,
@@ -50,7 +66,8 @@ struct MediaItem: Equatable, Identifiable {
         isContainer: Bool = false,
         canExpand: Bool = false,
         serviceID: Int? = nil,
-        releaseDate: String? = nil
+        releaseDate: String? = nil,
+        category: Category? = nil
     ) {
         self.id = id
         self.title = title
@@ -63,6 +80,7 @@ struct MediaItem: Equatable, Identifiable {
         self.canExpand = canExpand
         self.serviceID = serviceID
         self.releaseDate = releaseDate
+        self.category = category
     }
 
     var isPlayable: Bool { playURI != nil }

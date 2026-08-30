@@ -263,7 +263,8 @@ final class SpotifySearchModel: ObservableObject {
             artURL: artURL,
             playURI: playURI,
             isContainer: false,
-            canExpand: false
+            canExpand: false,
+            category: .track
         )
         // However this track ends up queued - a direct play, "Play Next", or a whole album -
         // this is the one point every track passes through, so it's remembered here rather
@@ -280,7 +281,8 @@ final class SpotifySearchModel: ObservableObject {
             artURL: album.images?.first.flatMap { URL(string: $0.url) },
             isContainer: true,
             canExpand: true,
-            releaseDate: album.release_date
+            releaseDate: album.release_date,
+            category: .album
         )
     }
 
@@ -291,7 +293,8 @@ final class SpotifySearchModel: ObservableObject {
             subtitle: playlist.owner?.display_name,
             artURL: playlist.images?.first.flatMap { URL(string: $0.url) },
             isContainer: true,
-            canExpand: true
+            canExpand: true,
+            category: .playlist
         )
     }
 }
