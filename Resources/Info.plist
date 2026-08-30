@@ -4,6 +4,8 @@
 <dict>
     <key>CFBundleExecutable</key>
     <string>SonosController</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.curtisblackwell.sonos-controller</string>
     <key>CFBundleName</key>

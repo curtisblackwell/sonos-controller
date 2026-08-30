@@ -20,6 +20,7 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
 cp ".build/release/SonosMenuBar" "$APP_DIR/Contents/MacOS/$APP_NAME"
+cp "Resources/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
 
 # SPOTIFY_CLIENT_ID is never committed to Info.plist - it's substituted in here from the
 # environment, empty for anyone who hasn't set one, which just leaves Spotify auth
