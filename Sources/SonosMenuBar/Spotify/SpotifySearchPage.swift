@@ -13,17 +13,16 @@ struct SpotifySearchPage: View {
     var body: some View {
         Group {
             if auth.isAuthenticated {
-                VStack(spacing: 0) {
-                    containerHeader
-                    MediaListView(
-                        browse: model,
-                        topology: topology,
-                        showsArtwork: model.openContainer == nil,
-                        showsFilterField: false,
-                        groupsByCategory: model.currentLevel?.objectID == "SPOTIFY:root",
-                        onViewAllCategory: { model.openCategory($0) },
-                        emptyDescriptionOverride: "Search for a track, album, or playlist above, then press Return."
-                    )
+                Group {
+                    if model.openContainer != nil {
+                        HStack(alignment: .top, spacing: 16) {
+                            containerHeader
+                            Divider()
+                            mediaList
+                        }
+                    } else {
+                        mediaList
+                    }
                 }
                 .onAppear { model.showHomeIfAtRoot() }
             } else {
@@ -45,14 +44,15 @@ struct SpotifySearchPage: View {
     }
 
     /// Art, title, artist, and release date for whichever album or playlist is open, plus a
-    /// button that plays it in full. Nothing shown while browsing anything else.
+    /// button that plays it in full. Forms a fixed-width column to the left of the track list;
+    /// nothing shown while browsing anything else.
     @ViewBuilder
     private var containerHeader: some View {
         if let container = model.openContainer {
             VStack(spacing: 10) {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(.quaternary)
-                    .frame(width: 120, height: 120)
+                    .frame(width: 240, height: 240)
                     .overlay {
                         if let url = container.artURL {
                             AsyncImage(url: url) { image in
@@ -82,19 +82,34 @@ struct SpotifySearchPage: View {
                     }
                 }
 
-                Button {
-                    model.playContainer(coordinatorUUID: topology.activeGroupID)
-                } label: {
-                    Label("Play \(container.noun)", systemImage: "play.fill")
+                if container.kind != .artist {
+                    Button {
+                        model.playContainer(coordinatorUUID: topology.activeGroupID)
+                    } label: {
+                        Label("Play \(container.noun)", systemImage: "play.fill")
+                    }
+                    .controlSize(.large)
+                    .buttonStyle(.borderedProminent)
                 }
-                .controlSize(.large)
-                .buttonStyle(.borderedProminent)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-
-            Divider()
+            .frame(width: 240)
+            .padding(16)
         }
+    }
+
+    private var mediaList: some View {
+        MediaListView(
+            browse: model,
+            topology: topology,
+            // An artist's own header art doesn't stand in for its albums' art the way an open
+            // album's or playlist's header does for its tracks - each album row still needs its
+            // own artwork.
+            showsArtwork: model.openContainer == nil || model.openContainer?.kind == .artist,
+            showsFilterField: false,
+            groupsByCategory: model.currentLevel?.objectID == "SPOTIFY:root",
+            onViewAllCategory: { model.openCategory($0) },
+            emptyDescriptionOverride: "Search for a track, album, or playlist above, then press Return."
+        )
     }
 
     private var connectPrompt: some View {

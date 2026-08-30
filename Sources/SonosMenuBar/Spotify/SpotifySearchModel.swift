@@ -48,7 +48,7 @@ final class SpotifySearchModel: ObservableObject {
     /// Set for the header `SpotifySearchPage` shows above an open album's or playlist's tracks -
     /// `nil` for anything else that's open (a track, artist, or nothing).
     struct ContainerHeader: Equatable {
-        enum Kind: Equatable { case album, playlist }
+        enum Kind: Equatable { case album, playlist, artist }
         let kind: Kind
         let title: String
         let artist: String?
@@ -196,6 +196,10 @@ final class SpotifySearchModel: ObservableObject {
         } else if item.id.hasPrefix("SPOTIFY:playlist:") {
             openContainer = ContainerHeader(
                 kind: .playlist, title: title, artist: item.subtitle, artURL: item.artURL, releaseDate: nil
+            )
+        } else if item.id.hasPrefix("SPOTIFY:artist:") {
+            openContainer = ContainerHeader(
+                kind: .artist, title: title, artist: nil, artURL: item.artURL, releaseDate: nil
             )
         } else {
             openContainer = nil
