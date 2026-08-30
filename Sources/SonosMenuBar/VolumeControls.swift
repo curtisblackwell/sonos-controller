@@ -18,12 +18,17 @@ struct VolumeSlider: View {
     /// started, so they need to know when one begins and ends. Room sliders write directly
     /// and have nothing to do here.
     var onEditingChanged: (Bool) -> Void = { _ in }
+    /// Room and group rows size themselves to a fixed 110pt so many stacked rows line up.
+    /// The header passes nil so the slider stretches to fill whatever width the row is
+    /// given, matching the Spotify search field above it regardless of icon sizing.
+    var sliderWidth: CGFloat? = 110
 
     var body: some View {
         HStack(spacing: 6) {
             Button(action: toggleMute) {
                 Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                     .foregroundStyle(isMuted ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
+                    .frame(width: 16)
             }
             .buttonStyle(.plain)
             .disabled(value == nil)
@@ -38,7 +43,7 @@ struct VolumeSlider: View {
                 in: Double(VolumeControl.range.lowerBound)...Double(VolumeControl.range.upperBound),
                 onEditingChanged: onEditingChanged
             )
-            .frame(width: 110)
+            .frame(maxWidth: sliderWidth ?? .infinity)
             .disabled(value == nil)
             .accessibilityLabel("\(label) volume")
             .accessibilityValue(value.map { "\($0) percent" } ?? "Not known yet")

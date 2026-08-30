@@ -12,6 +12,11 @@ struct HeaderBar: View {
     @ObservedObject var spotifyAuth: SpotifyAuth
     @Binding var selection: SidebarItem?
 
+    /// Total outer width shared by the search field and the household volume row, so mute
+    /// button + slider + number line up with the search box's edges rather than just the
+    /// slider matching the text field's inner width.
+    private let headerControlWidth: CGFloat = 220
+
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
             nowPlaying
@@ -36,7 +41,6 @@ struct HeaderBar: View {
                     .foregroundStyle(.secondary)
                 TextField("Search Spotify", text: $spotifySearch.filter)
                     .textFieldStyle(.plain)
-                    .frame(width: 180)
                     .onSubmit {
                         selection = .spotify
                         spotifySearch.search()
@@ -54,6 +58,7 @@ struct HeaderBar: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+            .frame(width: headerControlWidth)
         }
     }
 
@@ -116,8 +121,10 @@ struct HeaderBar: View {
                         } else {
                             volume.endHouseholdDrag()
                         }
-                    }
+                    },
+                    sliderWidth: nil
                 )
+                .frame(width: headerControlWidth)
 
                 Button("Match Quietest") {
                     volume.syncEverythingToQuietest()
