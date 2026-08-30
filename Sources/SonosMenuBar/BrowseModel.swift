@@ -30,6 +30,13 @@ final class BrowseModel: ObservableObject {
 
     private var coordinatorIP: String?
     private var generation = 0
+    /// Shared with `SpotifySearchModel`, which fills this in as it maps tracks - see
+    /// `SpotifyQueuedTrackCache`'s doc comment for why the queue's own `Browse` can't.
+    private let spotifyMetadataCache: SpotifyQueuedTrackCache
+
+    init(spotifyMetadataCache: SpotifyQueuedTrackCache) {
+        self.spotifyMetadataCache = spotifyMetadataCache
+    }
 
     var currentLevel: Level? { path.last }
 
@@ -107,7 +114,7 @@ final class BrowseModel: ObservableObject {
                 self.isLoading = false
                 switch result {
                 case let .success(items):
-                    self.items = items
+                    self.items = items.map(self.spotifyMetadataCache.fillGaps)
                 case let .failure(error):
                     Self.log.error("Browse \(level.objectID, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
                     self.items = []

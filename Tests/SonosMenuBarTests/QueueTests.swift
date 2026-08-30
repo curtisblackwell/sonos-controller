@@ -213,6 +213,41 @@ struct QueueMetadataTests {
     }
 }
 
+/// Unlike every other builder in this file, playing a whole album is allowed to clear the queue
+/// - it is only reachable from an explicit "Play Album" button, never from clicking a track.
+struct AlbumPlaybackPlanningTests {
+    private func albumTrack(_ id: String) -> MediaItem {
+        MediaItem(id: id, title: "Track \(id)", playURI: "x-sonos-spotify:spotify%3atrack%3a\(id)?sid=12&flags=8232&sn=13")
+    }
+
+    @Test func playingAnAlbumClearsTheQueueThenAddsEveryTrackInOrder() {
+        let tracks = [albumTrack("A"), albumTrack("B"), albumTrack("C")]
+        let commands = SonosQueue.commands(forAlbumTracks: tracks, coordinatorUUID: coordinatorUUID)
+        #expect(commands == [
+            .clearQueue,
+            .addToQueue(uri: tracks[0].playURI!, metadata: "", position: 0, asNext: false),
+            .addToQueue(uri: tracks[1].playURI!, metadata: "", position: 0, asNext: false),
+            .addToQueue(uri: tracks[2].playURI!, metadata: "", position: 0, asNext: false),
+            .setTransportURI(uri: queueSource, metadata: ""),
+            .seekToTrack(.number(1)),
+            .play,
+        ])
+    }
+
+    /// A track with no `playURI` yet (credentials not discovered) is skipped rather than
+    /// failing the whole album - the rest can still play.
+    @Test func tracksWithNothingToPlayAreSkipped() {
+        let unplayable = MediaItem(id: "X", title: "No URI")
+        let commands = SonosQueue.commands(forAlbumTracks: [unplayable, albumTrack("A")], coordinatorUUID: coordinatorUUID)
+        #expect(commands.filter { if case .addToQueue = $0 { return true } else { return false } }.count == 1)
+    }
+
+    @Test func anAlbumWithNothingPlayablePlansNothing() {
+        let commands = SonosQueue.commands(forAlbumTracks: [MediaItem(id: "X", title: "No URI")], coordinatorUUID: coordinatorUUID)
+        #expect(commands.isEmpty)
+    }
+}
+
 struct SeekEnvelopeTests {
     @Test func seekingToATrackUsesTrackNumberUnit() {
         let envelope = SonosControl.soapEnvelope(action: .seekTrack(number: 12))

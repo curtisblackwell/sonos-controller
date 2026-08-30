@@ -199,6 +199,15 @@ enum DIDL {
         queryValue(named: "sn", inPlayURI: uri)
     }
 
+    /// The bare Spotify track id (`4V0x90QcMh4ZxwHzEWOdtK`) out of an `x-sonos-spotify:` play
+    /// URI's `spotify%3atrack%3a…` segment - what `SpotifyQueuedTrackCache` keys its lookups on.
+    static func spotifyTrackID(inPlayURI uri: String) -> String? {
+        let marker = "spotify%3atrack%3a"
+        guard let range = uri.range(of: marker) else { return nil }
+        let id = uri[range.upperBound...].prefix { $0 != "?" }
+        return id.isEmpty ? nil : String(id)
+    }
+
     /// These URIs are not parseable by `URLComponents` - the part before `?` is an
     /// unencoded, colon-laden service id - so the query is read directly.
     private static func queryValue(named name: String, inPlayURI uri: String) -> String? {
@@ -291,6 +300,7 @@ private final class DIDLParser: NSObject, XMLParserDelegate {
                 id: id,
                 title: title,
                 subtitle: subtitle,
+                album: album,
                 artURL: DIDL.artURL(from: text["upnp:albumArtURI"], coordinatorIP: coordinatorIP),
                 playURI: playURI?.isEmpty == true ? nil : playURI,
                 // `r:resMD` is the metadata to play a favorite with. Its absence is normal for
@@ -306,8 +316,15 @@ private final class DIDLParser: NSObject, XMLParserDelegate {
     /// Artist for a track. For a favorite, the service it came from - which is what
     /// `r:description` holds, and the most useful thing to show when a list mixes services.
     private var subtitle: String? {
-        [text["dc:creator"], text["r:description"], text["upnp:album"]]
+        [text["dc:creator"], text["r:description"]]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty }
+    }
+
+    private var album: String? {
+        guard let value = text["upnp:album"]?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return value
     }
 }

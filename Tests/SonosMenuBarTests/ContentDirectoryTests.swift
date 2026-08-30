@@ -141,6 +141,7 @@ struct DIDLParsingTests {
         #expect(track.id == "Q:0/1")
         #expect(track.title == "Feel It All Around")
         #expect(track.subtitle == "Washed Out")
+        #expect(track.album == "Life of Leisure")
         #expect(!track.isContainer)
         #expect(!track.canExpand)
         #expect(track.serviceID == 12)
@@ -165,6 +166,7 @@ struct DIDLParsingTests {
         // The absence is preserved rather than papered over in the parser...
         #expect(items[0].title.isEmpty)
         #expect(items[0].subtitle == nil)
+        #expect(items[0].album == nil)
         // ...and turned into something readable at the point of display.
         #expect(items[0].displayTitle == "Unknown Track")
         #expect(items[0].isPlayable)

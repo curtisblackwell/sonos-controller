@@ -13,6 +13,9 @@ struct MediaListView<Model: MediaBrowsing>: View {
     /// the others have no meaning for. Both closures are nil for anything that isn't the queue
     /// - `BrowsePage` is the only caller that supplies them.
     var showsQueueEditing = false
+    /// `false` inside an open Spotify album: the album header above the list already shows its
+    /// art once, so repeating it on every row is redundant.
+    var showsArtwork = true
     var searchPrompt = "Filter"
     var onClearQueue: (() -> Void)?
     var onRemoveFromQueue: ((MediaItem) -> Void)?
@@ -159,11 +162,19 @@ struct MediaListView<Model: MediaBrowsing>: View {
 
     private func row(_ item: MediaItem) -> some View {
         HStack(spacing: 10) {
-            artwork(item)
+            if showsArtwork {
+                artwork(item)
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.displayTitle).lineLimit(1)
                 if let subtitle = item.subtitle {
                     Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if let album = item.album {
+                    Text(album)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

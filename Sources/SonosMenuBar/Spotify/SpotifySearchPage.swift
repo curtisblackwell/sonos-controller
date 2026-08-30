@@ -13,13 +13,17 @@ struct SpotifySearchPage: View {
     var body: some View {
         Group {
             if auth.isAuthenticated {
-                MediaListView(
-                    browse: model,
-                    topology: topology,
-                    searchPrompt: "Search Spotify",
-                    onFilterSubmit: { model.search() },
-                    emptyDescriptionOverride: "Search for a track, album, or playlist above, then press Return."
-                )
+                VStack(spacing: 0) {
+                    albumHeader
+                    MediaListView(
+                        browse: model,
+                        topology: topology,
+                        showsArtwork: model.openAlbum == nil,
+                        searchPrompt: "Search Spotify",
+                        onFilterSubmit: { model.search() },
+                        emptyDescriptionOverride: "Search for a track, album, or playlist above, then press Return."
+                    )
+                }
             } else {
                 connectPrompt
             }
@@ -35,6 +39,59 @@ struct SpotifySearchPage: View {
             Button("OK", role: .cancel) { model.errorMessage = nil }
         } message: { message in
             Text(message)
+        }
+    }
+
+    /// Art, title, artist, and release date for whichever album is open, plus a button that
+    /// plays it in full. Nothing shown while browsing anything else.
+    @ViewBuilder
+    private var albumHeader: some View {
+        if let album = model.openAlbum {
+            VStack(spacing: 10) {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(.quaternary)
+                    .frame(width: 120, height: 120)
+                    .overlay {
+                        if let url = album.artURL {
+                            AsyncImage(url: url) { image in
+                                image.resizable().aspectRatio(contentMode: .fill)
+                            } placeholder: {
+                                Image(systemName: "music.note").foregroundStyle(.secondary)
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        } else {
+                            Image(systemName: "music.note").foregroundStyle(.secondary)
+                        }
+                    }
+
+                VStack(spacing: 2) {
+                    Text(album.title)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                    if let artist = album.artist {
+                        Text(artist)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let releaseDate = album.releaseDate {
+                        Text(SpotifyReleaseDate.formatted(releaseDate))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Button {
+                    model.playAlbum(coordinatorUUID: topology.activeGroupID)
+                } label: {
+                    Label("Play Album", systemImage: "play.fill")
+                }
+                .controlSize(.large)
+                .buttonStyle(.borderedProminent)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+
+            Divider()
         }
     }
 

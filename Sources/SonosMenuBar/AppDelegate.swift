@@ -11,9 +11,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let topologySubscriber = TopologySubscriber()
     private let volume = VolumeModel()
     private let playback = PlaybackModel()
-    private let browse = BrowseModel()
+    private let spotifyQueuedTrackCache = SpotifyQueuedTrackCache()
+    private lazy var browse = BrowseModel(spotifyMetadataCache: spotifyQueuedTrackCache)
     private let spotifyAuth = SpotifyAuth()
-    private lazy var spotifySearchModel = SpotifySearchModel(auth: spotifyAuth)
+    private lazy var spotifySearchModel = SpotifySearchModel(auth: spotifyAuth, metadataCache: spotifyQueuedTrackCache)
     private var permissionPollTimer: Timer?
     /// Every player the last scan found, so a refresh has somewhere to ask without running
     /// another one.

@@ -26,6 +26,7 @@ enum SeekTarget: Equatable {
 /// awkward part - which calls a given item needs, and in what order - is testable without a
 /// speaker, the same way `TopologyModel.commands` makes grouping testable.
 enum QueueCommand: Equatable {
+    case clearQueue
     case setTransportURI(uri: String, metadata: String)
     case addToQueue(uri: String, metadata: String, position: Int, asNext: Bool)
     case seekToTrack(SeekTarget)
@@ -113,6 +114,27 @@ enum SonosQueue {
         }
     }
 
+    /// Replaces the queue outright with an album's tracks, in order, and plays it from the top.
+    ///
+    /// Unlike `commands(for:intent:coordinatorUUID:)`, this deliberately clears the queue - it
+    /// is only ever reached from an explicit "Play Album" button, never from clicking a track,
+    /// so it doesn't fall under the everyday-click invariant the other builder preserves. It has
+    /// to work this way rather than the one-line container play a Sonos-native container gets:
+    /// a Spotify album has no container URI this app can build (see `SpotifyURIBuilder`'s doc
+    /// comment), so playing "the album" means enumerating and queuing its tracks instead.
+    static func commands(forAlbumTracks tracks: [MediaItem], coordinatorUUID: String) -> [QueueCommand] {
+        let adds: [QueueCommand] = tracks.compactMap { item in
+            guard let uri = item.playURI else { return nil }
+            return .addToQueue(uri: uri, metadata: item.playMetadata ?? "", position: 0, asNext: false)
+        }
+        guard !adds.isEmpty else { return [] }
+        return [.clearQueue] + adds + [
+            .setTransportURI(uri: queueURI(coordinatorUUID: coordinatorUUID), metadata: ""),
+            .seekToTrack(.number(1)),
+            .play,
+        ]
+    }
+
     // MARK: - Sending
 
     /// Runs a command sequence in order against the group's coordinator.
@@ -166,6 +188,8 @@ enum SonosQueue {
 
     private static func action(for command: QueueCommand, enqueuedTrackNumber: Int?) -> SonosAction? {
         switch command {
+        case .clearQueue:
+            return .removeAllTracksFromQueue
         case let .setTransportURI(uri, metadata):
             return .setAVTransportURI(uri: uri, metadata: metadata)
         case let .addToQueue(uri, metadata, position, asNext):

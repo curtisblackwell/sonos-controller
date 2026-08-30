@@ -24,7 +24,14 @@ struct BrowsePage: View {
         // The model is shared across pages, so it has to be pointed at this page's root both
         // on first appearance and whenever the sidebar switches to a different one. `show` is
         // a no-op when the root is already open, so this doesn't refetch on every redraw.
-        .onAppear { browse.show(root: root) }
+        .onAppear {
+            browse.show(root: root)
+            // Unlike Favorites or Playlists, the queue can change from outside this page -
+            // a Spotify play uses a separate model that never touches `browse.path`, and
+            // another Sonos client can add to it too - so `show`'s no-op on an already-open
+            // root would leave a stale queue on screen. Reappearing on it always re-reads.
+            if showsQueueEditing { browse.reload() }
+        }
         .onChange(of: root) { _, newRoot in browse.show(root: newRoot) }
         .alert(
             "Couldn't Load",

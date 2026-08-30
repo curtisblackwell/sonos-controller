@@ -15,6 +15,9 @@ final class SpotifySearchModel: ObservableObject {
     private static let rootLevel = BrowseModel.Level(objectID: "SPOTIFY:root", title: "Spotify")
 
     let auth: SpotifyAuth
+    /// Shared with `BrowseModel`, which reads it back for queue rows `Browse` can't title -
+    /// see `SpotifyQueuedTrackCache`'s doc comment.
+    private let metadataCache: SpotifyQueuedTrackCache
 
     @Published private(set) var path: [BrowseModel.Level] = [rootLevel]
     @Published private(set) var items: [MediaItem]? = []
@@ -35,8 +38,20 @@ final class SpotifySearchModel: ObservableObject {
     /// even when Spotify's own "tracks of an album" response omits the album object.
     private var openContainerArt: URL?
 
-    init(auth: SpotifyAuth) {
+    /// Set for the header `SpotifySearchPage` shows above an open album's tracks - `nil` for
+    /// anything else that's open (a playlist, or nothing).
+    struct AlbumHeader: Equatable {
+        let title: String
+        let artist: String?
+        let artURL: URL?
+        let releaseDate: String?
+    }
+
+    @Published private(set) var openAlbum: AlbumHeader?
+
+    init(auth: SpotifyAuth, metadataCache: SpotifyQueuedTrackCache) {
         self.auth = auth
+        self.metadataCache = metadataCache
     }
 
     var currentLevel: BrowseModel.Level? { path.last }
@@ -54,6 +69,7 @@ final class SpotifySearchModel: ObservableObject {
     func search() {
         let query = filter.trimmingCharacters(in: .whitespacesAndNewlines)
         path = [Self.rootLevel]
+        openAlbum = nil
         guard !query.isEmpty else {
             items = []
             return
@@ -88,6 +104,9 @@ final class SpotifySearchModel: ObservableObject {
         guard item.canExpand else { return }
         let title = item.displayTitle
         openContainerArt = item.artURL
+        openAlbum = item.id.hasPrefix("SPOTIFY:album:")
+            ? AlbumHeader(title: title, artist: item.subtitle, artURL: item.artURL, releaseDate: item.releaseDate)
+            : nil
         path.append(BrowseModel.Level(objectID: item.id, title: title))
         loadContainer(id: item.id)
     }
@@ -98,6 +117,7 @@ final class SpotifySearchModel: ObservableObject {
         if let level = currentLevel, level.objectID != Self.rootLevel.objectID {
             loadContainer(id: level.objectID)
         } else {
+            openAlbum = nil
             search()
         }
     }
@@ -151,6 +171,24 @@ final class SpotifySearchModel: ObservableObject {
         SonosQueue.perform(commands, coordinatorIP: ip) { [weak self] result in
             if case let .failure(error) = result {
                 self?.errorMessage = "Couldn't play \(item.displayTitle): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// The open album's "Play Album" button: replaces the queue with its tracks and starts it.
+    func playAlbum(coordinatorUUID: String?) {
+        guard let coordinatorUUID, let ip = coordinatorIP else {
+            errorMessage = "Pick a group for the media keys first - that's where music plays."
+            return
+        }
+        let commands = SonosQueue.commands(forAlbumTracks: items ?? [], coordinatorUUID: coordinatorUUID)
+        guard !commands.isEmpty else {
+            errorMessage = "Play something from Spotify in the Sonos app once (or add a Spotify favorite), so this app can find your linked account."
+            return
+        }
+        SonosQueue.perform(commands, coordinatorIP: ip) { [weak self] result in
+            if case let .failure(error) = result {
+                self?.errorMessage = "Couldn't play the album: \(error.localizedDescription)"
             }
         }
     }
@@ -217,15 +255,21 @@ final class SpotifySearchModel: ObservableObject {
         if let credentials {
             playURI = SpotifyURIBuilder.playURI(spotifyTrackID: track.id, sid: credentials.sid, sn: credentials.sn)
         }
-        return MediaItem(
+        let item = MediaItem(
             id: "SPOTIFY:track:\(track.id)",
             title: track.name,
             subtitle: track.artists.map(\.name).joined(separator: ", "),
+            album: track.album?.name,
             artURL: artURL,
             playURI: playURI,
             isContainer: false,
             canExpand: false
         )
+        // However this track ends up queued - a direct play, "Play Next", or a whole album -
+        // this is the one point every track passes through, so it's remembered here rather
+        // than at each call site that might queue it.
+        metadataCache.remember(item)
+        return item
     }
 
     private func mediaItem(from album: SpotifyModels.Album) -> MediaItem {
@@ -235,7 +279,8 @@ final class SpotifySearchModel: ObservableObject {
             subtitle: album.artists.map(\.name).joined(separator: ", "),
             artURL: album.images?.first.flatMap { URL(string: $0.url) },
             isContainer: true,
-            canExpand: true
+            canExpand: true,
+            releaseDate: album.release_date
         )
     }
 

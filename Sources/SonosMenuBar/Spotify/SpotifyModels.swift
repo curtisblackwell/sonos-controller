@@ -35,6 +35,9 @@ enum SpotifyModels {
         let uri: String
         let images: [Image]?
         let artists: [Artist]
+        /// `"2026"`, `"2026-08"`, or `"2026-08-29"`, depending on `release_date_precision` -
+        /// which this app doesn't decode, since the string's own length already says which.
+        let release_date: String?
     }
 
     struct Playlist: Decodable {
