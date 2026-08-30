@@ -73,6 +73,9 @@ final class VolumeModel: ObservableObject {
     private var groupDrags: [String: GroupDrag] = [:]
     /// Ends the implicit drag a volume key opens. Sliders end theirs explicitly.
     private var groupDragExpiry: [String: Timer] = [:]
+    /// Same idea as `groupDrags`, for the household-wide slider - there's only ever one, so
+    /// it doesn't need to be keyed.
+    private var householdDrag: GroupDrag?
 
     /// Which value a write targets. Volume and mute are separate targets on purpose: they
     /// are independent writes, and coalescing one behind the other would drop it.
@@ -110,6 +113,7 @@ final class VolumeModel: ObservableObject {
         // A group that has been regrouped underneath a held slider has no members left to
         // apply the drag to.
         for id in groupDrags.keys where !liveGroupIDs.contains(id) { endGroupDrag(id) }
+        if let drag = householdDrag, !drag.rooms.keys.allSatisfy(liveRoomIDs.contains) { endHouseholdDrag() }
 
         if isWatching { refresh() }
     }
@@ -192,7 +196,7 @@ final class VolumeModel: ObservableObject {
     /// accumulating. Without it - a keyboard adjustment, VoiceOver - each change is measured
     /// against the current state instead, which is right, just lossy at the ends.
     func beginGroupDrag(_ group: SonosGroup) {
-        guard !group.isStandalone, let baseline = snapshot(of: group) else { return }
+        guard !group.isStandalone, let baseline = snapshot(of: group.members) else { return }
         groupDrags[group.id] = baseline
     }
 
@@ -220,7 +224,7 @@ final class VolumeModel: ObservableObject {
             setVolume(current + delta, forRoom: room)
             return
         }
-        guard groupDrags[group.id] != nil || snapshot(of: group) != nil else {
+        guard groupDrags[group.id] != nil || snapshot(of: group.members) != nil else {
             readMembers(of: group) { [weak self] in self?.nudgeVolume(forGroup: group, by: delta) }
             return
         }
@@ -262,7 +266,7 @@ final class VolumeModel: ObservableObject {
             return
         }
         let value = VolumeControl.clamped(volume)
-        guard let baseline = groupDrags[group.id] ?? snapshot(of: group) else { return }
+        guard let baseline = groupDrags[group.id] ?? snapshot(of: group.members) else { return }
         if groupDrags[group.id] != nil { groupDrags[group.id]?.position = value }
 
         for (uuid, target) in Self.memberTargets(baseline: baseline.rooms, movingFrom: baseline.groupVolume, to: value) {
@@ -321,10 +325,57 @@ final class VolumeModel: ObservableObject {
         write(.roomMute(room.uuid), value: muted ? 1 : 0)
     }
 
-    private func snapshot(of group: SonosGroup) -> GroupDrag? {
-        guard let current = Self.averageVolume(of: group.members, in: roomVolume) else { return nil }
+    // MARK: - Household volume
+
+    /// Every room in the house, standalone or grouped - the household is to a group what a
+    /// group is to a room.
+    private var allRooms: [SonosRoom] { groups.flatMap(\.members) }
+
+    func volumeForHousehold() -> Int? {
+        if let householdDrag { return householdDrag.position }
+        return Self.averageVolume(of: allRooms, in: roomVolume)
+    }
+
+    func beginHouseholdDrag() {
+        guard let baseline = snapshot(of: allRooms) else { return }
+        householdDrag = baseline
+    }
+
+    func endHouseholdDrag() {
+        householdDrag = nil
+    }
+
+    /// Scales every room in the house toward the requested household volume, the same ratio
+    /// math as `setVolume(_:forGroup:)`.
+    func setHouseholdVolume(_ volume: Int) {
+        let value = VolumeControl.clamped(volume)
+        guard let baseline = householdDrag ?? snapshot(of: allRooms) else { return }
+        if householdDrag != nil { householdDrag?.position = value }
+
+        for (uuid, target) in Self.memberTargets(baseline: baseline.rooms, movingFrom: baseline.groupVolume, to: value) {
+            guard roomVolume[uuid] != target, let room = allRooms.first(where: { $0.uuid == uuid }) else { continue }
+            setVolume(target, forRoom: room)
+        }
+    }
+
+    /// True only once every group in the house reports muted - matches `isMuted(group:)`,
+    /// which is itself already the right granularity for a single write (`GroupRenderingControl`
+    /// for a multi-room group, `RenderingControl` for a standalone one).
+    func isHouseholdMuted() -> Bool {
+        !groups.isEmpty && groups.allSatisfy { isMuted(group: $0) }
+    }
+
+    func toggleHouseholdMute() {
+        let target = !isHouseholdMuted()
+        for group in groups where isMuted(group: group) != target {
+            toggleMute(group: group)
+        }
+    }
+
+    private func snapshot(of members: [SonosRoom]) -> GroupDrag? {
+        guard let current = Self.averageVolume(of: members, in: roomVolume) else { return nil }
         var rooms: [String: Int] = [:]
-        for member in group.members {
+        for member in members {
             guard let volume = roomVolume[member.uuid] else { return nil }
             rooms[member.uuid] = volume
         }
@@ -338,7 +389,7 @@ final class VolumeModel: ObservableObject {
     }
 
     func syncEverythingToQuietest() {
-        syncToQuietest(rooms: groups.flatMap(\.members), describedAs: "every room")
+        syncToQuietest(rooms: allRooms, describedAs: "every room")
     }
 
     /// Reads every room, then writes the quietest reading to the rest.

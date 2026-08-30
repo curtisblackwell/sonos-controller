@@ -14,9 +14,19 @@ final class PlaybackModel: ObservableObject {
     /// nil until a reading has landed for the current coordinator, or when there is no
     /// active group to read - both cases the button shows as unknown rather than guessing.
     @Published private(set) var isPlaying: Bool?
+    @Published private(set) var track: TrackMetadata?
+    @Published private(set) var durationSeconds: Int?
+    /// The value the poll last read. `elapsedSeconds` is what the view actually binds to -
+    /// it prefers a live seek drag over this the same way `VolumeModel.volume(forGroup:)`
+    /// prefers a live volume drag over its last poll reading.
+    @Published private var polledElapsedSeconds: Int?
+    private var seekOverride: Int?
+
+    var elapsedSeconds: Int? { seekOverride ?? polledElapsedSeconds }
 
     private var coordinatorIP: String?
     private var pollTimer: Timer?
+    private var tickTimer: Timer?
     /// Bumped by every command and every coordinator change, so a poll already in flight
     /// can't land after and stomp a fresher optimistic flip or a switch to another group.
     private var generation = 0
@@ -32,6 +42,10 @@ final class PlaybackModel: ObservableObject {
         self.coordinatorIP = coordinatorIP
         generation += 1
         isPlaying = nil
+        track = nil
+        durationSeconds = nil
+        polledElapsedSeconds = nil
+        seekOverride = nil
         if isWatching { refresh() }
     }
 
@@ -43,11 +57,16 @@ final class PlaybackModel: ObservableObject {
         pollTimer = Timer.scheduledTimer(withTimeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
             self?.refresh()
         }
+        tickTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            self?.tick()
+        }
     }
 
     func stopPolling() {
         pollTimer?.invalidate()
         pollTimer = nil
+        tickTimer?.invalidate()
+        tickTimer = nil
     }
 
     private func refresh() {
@@ -60,6 +79,28 @@ final class PlaybackModel: ObservableObject {
                 self.isPlaying = state == "PLAYING" || state == "TRANSITIONING"
             }
         }
+        SonosControl.send(action: .getPositionInfo, to: ip) { [weak self] data in
+            DispatchQueue.main.async {
+                guard let self, requestGeneration == self.generation, ip == self.coordinatorIP else { return }
+                guard let data else { return }
+                self.track = SonosControl.trackMetadata(from: data, coordinatorIP: ip)
+                self.durationSeconds = SonosControl.trackDurationSeconds(from: data)
+                // A seek already in flight owns the elapsed time until it lands - a poll that
+                // started before the drag ended would otherwise snap the slider back.
+                guard self.seekOverride == nil else { return }
+                self.polledElapsedSeconds = SonosControl.relTimeSeconds(from: data)
+            }
+        }
+    }
+
+    /// Advances the slider between polls, so a progress bar that only moved once every 2.5s
+    /// didn't read as broken. Only ticks what the poll itself would eventually confirm.
+    private func tick() {
+        guard isPlaying == true, seekOverride == nil,
+              let elapsed = polledElapsedSeconds
+        else { return }
+        let next = elapsed + 1
+        polledElapsedSeconds = durationSeconds.map { min(next, $0) } ?? next
     }
 
     // MARK: - Actions
@@ -92,5 +133,30 @@ final class PlaybackModel: ObservableObject {
             SonosControl.send(action: .seek(target: "0:00:00"), to: ip)
         }
         generation += 1
+    }
+
+    // MARK: - Seeking
+
+    /// Takes hold of the progress slider, the same reason `VolumeModel.beginGroupDrag` exists:
+    /// while the user is dragging, the poll's own answer is stale by definition.
+    func beginSeekDrag() {
+        seekOverride = elapsedSeconds
+    }
+
+    func updateSeekDrag(to seconds: Int) {
+        seekOverride = seconds
+    }
+
+    func endSeekDrag(to seconds: Int) {
+        guard let ip = coordinatorIP else {
+            seekOverride = nil
+            return
+        }
+        // Flip optimistically, same as `togglePlayPause` - otherwise the slider sits at the
+        // drop point for up to a poll interval before the seek is reflected.
+        polledElapsedSeconds = seconds
+        seekOverride = nil
+        generation += 1
+        SonosControl.send(action: .seek(target: SonosSOAP.formatTime(seconds: seconds)), to: ip)
     }
 }
