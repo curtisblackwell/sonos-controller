@@ -14,11 +14,11 @@ struct SpotifySearchPage: View {
         Group {
             if auth.isAuthenticated {
                 VStack(spacing: 0) {
-                    albumHeader
+                    containerHeader
                     MediaListView(
                         browse: model,
                         topology: topology,
-                        showsArtwork: model.openAlbum == nil,
+                        showsArtwork: model.openContainer == nil,
                         showsFilterField: false,
                         groupsByCategory: model.currentLevel?.objectID == "SPOTIFY:root",
                         onViewAllCategory: { model.openCategory($0) },
@@ -44,17 +44,17 @@ struct SpotifySearchPage: View {
         }
     }
 
-    /// Art, title, artist, and release date for whichever album is open, plus a button that
-    /// plays it in full. Nothing shown while browsing anything else.
+    /// Art, title, artist, and release date for whichever album or playlist is open, plus a
+    /// button that plays it in full. Nothing shown while browsing anything else.
     @ViewBuilder
-    private var albumHeader: some View {
-        if let album = model.openAlbum {
+    private var containerHeader: some View {
+        if let container = model.openContainer {
             VStack(spacing: 10) {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(.quaternary)
                     .frame(width: 120, height: 120)
                     .overlay {
-                        if let url = album.artURL {
+                        if let url = container.artURL {
                             AsyncImage(url: url) { image in
                                 image.resizable().aspectRatio(contentMode: .fill)
                             } placeholder: {
@@ -67,15 +67,15 @@ struct SpotifySearchPage: View {
                     }
 
                 VStack(spacing: 2) {
-                    Text(album.title)
+                    Text(container.title)
                         .font(.headline)
                         .multilineTextAlignment(.center)
-                    if let artist = album.artist {
+                    if let artist = container.artist {
                         Text(artist)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
-                    if let releaseDate = album.releaseDate {
+                    if let releaseDate = container.releaseDate {
                         Text(SpotifyReleaseDate.formatted(releaseDate))
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -83,9 +83,9 @@ struct SpotifySearchPage: View {
                 }
 
                 Button {
-                    model.playAlbum(coordinatorUUID: topology.activeGroupID)
+                    model.playContainer(coordinatorUUID: topology.activeGroupID)
                 } label: {
-                    Label("Play Album", systemImage: "play.fill")
+                    Label("Play \(container.noun)", systemImage: "play.fill")
                 }
                 .controlSize(.large)
                 .buttonStyle(.borderedProminent)

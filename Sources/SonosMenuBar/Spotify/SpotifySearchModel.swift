@@ -45,16 +45,20 @@ final class SpotifySearchModel: ObservableObject {
     /// even when Spotify's own "tracks of an album" response omits the album object.
     private var openContainerArt: URL?
 
-    /// Set for the header `SpotifySearchPage` shows above an open album's tracks - `nil` for
-    /// anything else that's open (a playlist, or nothing).
-    struct AlbumHeader: Equatable {
+    /// Set for the header `SpotifySearchPage` shows above an open album's or playlist's tracks -
+    /// `nil` for anything else that's open (a track, artist, or nothing).
+    struct ContainerHeader: Equatable {
+        enum Kind: Equatable { case album, playlist }
+        let kind: Kind
         let title: String
         let artist: String?
         let artURL: URL?
         let releaseDate: String?
+
+        var noun: String { kind == .album ? "Album" : "Playlist" }
     }
 
-    @Published private(set) var openAlbum: AlbumHeader?
+    @Published private(set) var openContainer: ContainerHeader?
 
     /// The full (unpaged) list behind whichever "View All \(category)" page is currently open -
     /// restored on `pop(to:)` rather than re-fetched, since it isn't backed by a real Spotify
@@ -81,7 +85,7 @@ final class SpotifySearchModel: ObservableObject {
     func search() {
         let query = filter.trimmingCharacters(in: .whitespacesAndNewlines)
         path = [Self.rootLevel]
-        openAlbum = nil
+        openContainer = nil
         guard !query.isEmpty else {
             loadHome()
             return
@@ -185,9 +189,17 @@ final class SpotifySearchModel: ObservableObject {
         guard item.canExpand else { return }
         let title = item.displayTitle
         openContainerArt = item.artURL
-        openAlbum = item.id.hasPrefix("SPOTIFY:album:")
-            ? AlbumHeader(title: title, artist: item.subtitle, artURL: item.artURL, releaseDate: item.releaseDate)
-            : nil
+        if item.id.hasPrefix("SPOTIFY:album:") {
+            openContainer = ContainerHeader(
+                kind: .album, title: title, artist: item.subtitle, artURL: item.artURL, releaseDate: item.releaseDate
+            )
+        } else if item.id.hasPrefix("SPOTIFY:playlist:") {
+            openContainer = ContainerHeader(
+                kind: .playlist, title: title, artist: item.subtitle, artURL: item.artURL, releaseDate: nil
+            )
+        } else {
+            openContainer = nil
+        }
         path.append(BrowseModel.Level(objectID: item.id, title: title))
         loadContainer(id: item.id)
     }
@@ -208,7 +220,7 @@ final class SpotifySearchModel: ObservableObject {
         guard index >= 0, index < path.count, index != path.count - 1 else { return }
         path = Array(path.prefix(index + 1))
         guard let level = currentLevel, level.objectID != Self.rootLevel.objectID else {
-            openAlbum = nil
+            openContainer = nil
             viewAllItems = nil
             search()
             return
@@ -284,20 +296,22 @@ final class SpotifySearchModel: ObservableObject {
         }
     }
 
-    /// The open album's "Play Album" button: replaces the queue with its tracks and starts it.
-    func playAlbum(coordinatorUUID: String?) {
+    /// The open album's/playlist's "Play Album"/"Play Playlist" button: replaces the queue with
+    /// its tracks and starts it.
+    func playContainer(coordinatorUUID: String?) {
         guard let coordinatorUUID, let ip = coordinatorIP else {
             errorMessage = "Pick a group for the media keys first - that's where music plays."
             return
         }
-        let commands = SonosQueue.commands(forAlbumTracks: items ?? [], coordinatorUUID: coordinatorUUID)
+        let noun = openContainer?.noun ?? "container"
+        let commands = SonosQueue.commands(forContainerTracks: items ?? [], coordinatorUUID: coordinatorUUID)
         guard !commands.isEmpty else {
             errorMessage = "Play something from Spotify in the Sonos app once (or add a Spotify favorite), so this app can find your linked account."
             return
         }
         SonosQueue.perform(commands, coordinatorIP: ip) { [weak self] result in
             if case let .failure(error) = result {
-                self?.errorMessage = "Couldn't play the album: \(error.localizedDescription)"
+                self?.errorMessage = "Couldn't play the \(noun.lowercased()): \(error.localizedDescription)"
             }
         }
     }

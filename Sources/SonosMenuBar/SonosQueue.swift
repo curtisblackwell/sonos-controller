@@ -114,15 +114,17 @@ enum SonosQueue {
         }
     }
 
-    /// Replaces the queue outright with an album's tracks, in order, and plays it from the top.
+    /// Replaces the queue outright with a container's tracks (an album's or a playlist's), in
+    /// order, and plays it from the top.
     ///
     /// Unlike `commands(for:intent:coordinatorUUID:)`, this deliberately clears the queue - it
-    /// is only ever reached from an explicit "Play Album" button, never from clicking a track,
-    /// so it doesn't fall under the everyday-click invariant the other builder preserves. It has
-    /// to work this way rather than the one-line container play a Sonos-native container gets:
-    /// a Spotify album has no container URI this app can build (see `SpotifyURIBuilder`'s doc
-    /// comment), so playing "the album" means enumerating and queuing its tracks instead.
-    static func commands(forAlbumTracks tracks: [MediaItem], coordinatorUUID: String) -> [QueueCommand] {
+    /// is only ever reached from an explicit "Play Album"/"Play Playlist" button, never from
+    /// clicking a track, so it doesn't fall under the everyday-click invariant the other builder
+    /// preserves. It has to work this way rather than the one-line container play a Sonos-native
+    /// container gets: a Spotify album or playlist has no container URI this app can build (see
+    /// `SpotifyURIBuilder`'s doc comment), so playing it means enumerating and queuing its tracks
+    /// instead.
+    static func commands(forContainerTracks tracks: [MediaItem], coordinatorUUID: String) -> [QueueCommand] {
         let adds: [QueueCommand] = tracks.compactMap { item in
             guard let uri = item.playURI else { return nil }
             return .addToQueue(uri: uri, metadata: item.playMetadata ?? "", position: 0, asNext: false)

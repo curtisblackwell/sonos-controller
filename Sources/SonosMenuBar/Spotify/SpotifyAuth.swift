@@ -16,10 +16,15 @@ final class SpotifyAuth: ObservableObject {
     private static let scopes =
         "playlist-read-private playlist-read-collaborative user-library-read user-top-read user-follow-read"
 
-    private enum KeychainKey {
-        static let accessToken = "accessToken"
-        static let refreshToken = "refreshToken"
-        static let expiresAt = "expiresAt"
+    /// All three fields live in one Keychain item (not one item each) - macOS prompts for
+    /// per-item access separately, so three items meant three password prompts the first time
+    /// the app opened after every rebuild.
+    private static let keychainKey = "spotifyTokens"
+
+    private struct StoredTokens: Codable {
+        var accessToken: String
+        var refreshToken: String
+        var expiresAt: TimeInterval
     }
 
     @Published private(set) var isAuthenticated: Bool
@@ -31,7 +36,7 @@ final class SpotifyAuth: ObservableObject {
     private var pendingState: String?
 
     init() {
-        isAuthenticated = SpotifyKeychain.get(KeychainKey.refreshToken) != nil
+        isAuthenticated = Self.loadTokens() != nil
     }
 
     // MARK: - Login
@@ -85,9 +90,7 @@ final class SpotifyAuth: ObservableObject {
     }
 
     func signOut() {
-        SpotifyKeychain.remove(KeychainKey.accessToken)
-        SpotifyKeychain.remove(KeychainKey.refreshToken)
-        SpotifyKeychain.remove(KeychainKey.expiresAt)
+        SpotifyKeychain.remove(Self.keychainKey)
         DispatchQueue.main.async { [weak self] in
             self?.isAuthenticated = false
         }
@@ -95,20 +98,24 @@ final class SpotifyAuth: ObservableObject {
 
     // MARK: - Token access
 
+    private static func loadTokens() -> StoredTokens? {
+        SpotifyKeychain.get(keychainKey)
+            .flatMap { Data($0.utf8) }
+            .flatMap { try? JSONDecoder().decode(StoredTokens.self, from: $0) }
+    }
+
     /// The current access token, refreshing first if it has expired (or is about to). Runs
     /// the completion on whatever queue the underlying request lands on.
     func validAccessToken(completion: @escaping (String?) -> Void) {
-        guard let refreshToken = SpotifyKeychain.get(KeychainKey.refreshToken) else {
+        guard let tokens = Self.loadTokens() else {
             completion(nil)
             return
         }
-        if let token = SpotifyKeychain.get(KeychainKey.accessToken),
-           let expiresAt = SpotifyKeychain.get(KeychainKey.expiresAt).flatMap(TimeInterval.init),
-           !Self.isExpired(expiresAt: expiresAt) {
-            completion(token)
+        if !Self.isExpired(expiresAt: tokens.expiresAt) {
+            completion(tokens.accessToken)
             return
         }
-        refresh(refreshToken: refreshToken, completion: completion)
+        refresh(refreshToken: tokens.refreshToken, completion: completion)
     }
 
     /// A 60s cushion so a token that is about to expire gets refreshed rather than handed out
@@ -178,15 +185,18 @@ final class SpotifyAuth: ObservableObject {
             let expires_in: Int
             let refresh_token: String?
         }
-        guard let response = try? JSONDecoder().decode(TokenResponse.self, from: data) else { return nil }
-        SpotifyKeychain.set(response.access_token, forKey: KeychainKey.accessToken)
-        SpotifyKeychain.set(
-            String(Date().timeIntervalSince1970 + Double(response.expires_in)),
-            forKey: KeychainKey.expiresAt
+        guard let response = try? JSONDecoder().decode(TokenResponse.self, from: data),
+              let refreshToken = response.refresh_token ?? fallbackRefreshToken
+        else { return nil }
+        let tokens = StoredTokens(
+            accessToken: response.access_token,
+            refreshToken: refreshToken,
+            expiresAt: Date().timeIntervalSince1970 + Double(response.expires_in)
         )
-        if let refreshToken = response.refresh_token ?? fallbackRefreshToken {
-            SpotifyKeychain.set(refreshToken, forKey: KeychainKey.refreshToken)
+        guard let data = try? JSONEncoder().encode(tokens), let json = String(data: data, encoding: .utf8) else {
+            return nil
         }
+        SpotifyKeychain.set(json, forKey: keychainKey)
         return response.access_token
     }
 

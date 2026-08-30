@@ -222,7 +222,7 @@ struct AlbumPlaybackPlanningTests {
 
     @Test func playingAnAlbumClearsTheQueueThenAddsEveryTrackInOrder() {
         let tracks = [albumTrack("A"), albumTrack("B"), albumTrack("C")]
-        let commands = SonosQueue.commands(forAlbumTracks: tracks, coordinatorUUID: coordinatorUUID)
+        let commands = SonosQueue.commands(forContainerTracks: tracks, coordinatorUUID: coordinatorUUID)
         #expect(commands == [
             .clearQueue,
             .addToQueue(uri: tracks[0].playURI!, metadata: "", position: 0, asNext: false),
@@ -238,12 +238,12 @@ struct AlbumPlaybackPlanningTests {
     /// failing the whole album - the rest can still play.
     @Test func tracksWithNothingToPlayAreSkipped() {
         let unplayable = MediaItem(id: "X", title: "No URI")
-        let commands = SonosQueue.commands(forAlbumTracks: [unplayable, albumTrack("A")], coordinatorUUID: coordinatorUUID)
+        let commands = SonosQueue.commands(forContainerTracks: [unplayable, albumTrack("A")], coordinatorUUID: coordinatorUUID)
         #expect(commands.filter { if case .addToQueue = $0 { return true } else { return false } }.count == 1)
     }
 
     @Test func anAlbumWithNothingPlayablePlansNothing() {
-        let commands = SonosQueue.commands(forAlbumTracks: [MediaItem(id: "X", title: "No URI")], coordinatorUUID: coordinatorUUID)
+        let commands = SonosQueue.commands(forContainerTracks: [MediaItem(id: "X", title: "No URI")], coordinatorUUID: coordinatorUUID)
         #expect(commands.isEmpty)
     }
 }
