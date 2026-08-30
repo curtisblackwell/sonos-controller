@@ -1,5 +1,17 @@
 import SwiftUI
 
+/// Lets the live-indicator icon lock its vertical center to the progress row's center,
+/// instead of the whole footer's, even though the two sit in separate columns.
+private struct ProgressRowAlignment: AlignmentID {
+    static func defaultValue(in context: ViewDimensions) -> CGFloat {
+        context[VerticalAlignment.center]
+    }
+}
+
+private extension VerticalAlignment {
+    static let progressRowCenter = VerticalAlignment(ProgressRowAlignment.self)
+}
+
 /// The persistent bar along the bottom of the window: the transport, the seek slider, and
 /// whether we're still hearing from the household.
 ///
@@ -16,7 +28,7 @@ struct NowPlayingBar: View {
     @State private var barWidth: CGFloat = MainWindowView.minWindowWidth
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 16) {
+        HStack(alignment: .progressRowCenter, spacing: 16) {
             Spacer(minLength: 12)
             VStack(spacing: 6) {
                 transportControls
@@ -39,7 +51,7 @@ struct NowPlayingBar: View {
         // Fixed rather than left to size to content, so the bar doesn't grow or shrink
         // as playback state comes and goes - the transport row disappears entirely
         // with no active group, and the row heights alone wouldn't hold the gap open.
-        .frame(height: 84)
+        .frame(height: 64)
         .background {
             GeometryReader { proxy in
                 Color.clear
@@ -85,6 +97,7 @@ struct NowPlayingBar: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 36, alignment: .leading)
         }
+        .alignmentGuide(.progressRowCenter) { $0[VerticalAlignment.center] }
     }
 
     private var remainingLabel: String {
@@ -102,32 +115,41 @@ struct NowPlayingBar: View {
 
     /// Only shown once there's an active group to target - matches the star toggle that
     /// picks one, and the media keys these buttons mirror.
+    /// Bar content height (84 total minus 8pt top/bottom padding) minus the progress row and
+    /// the spacing above it - what's left is what the transport buttons get to fill.
+    private static let transportRowHeight: CGFloat = 22
+
     @ViewBuilder
     private var transportControls: some View {
         if model.activeGroupID != nil {
-            HStack(spacing: 4) {
-                transportButton(systemImage: "backward.end.fill", help: "Previous Track") {
+            HStack(alignment: .center, spacing: 14) {
+                transportButton(systemImage: "backward.end.fill", help: "Previous Track", height: Self.transportRowHeight * 0.75) {
                     playback.previous()
                 }
                 transportButton(
                     systemImage: playback.isPlaying == true ? "pause.fill" : "play.fill",
-                    help: playback.isPlaying == true ? "Pause" : "Play"
+                    help: playback.isPlaying == true ? "Pause" : "Play",
+                    height: Self.transportRowHeight
                 ) {
                     playback.togglePlayPause()
                 }
                 .disabled(playback.isPlaying == nil)
-                transportButton(systemImage: "forward.end.fill", help: "Next Track") {
+                transportButton(systemImage: "forward.end.fill", help: "Next Track", height: Self.transportRowHeight * 0.75) {
                     playback.next()
                 }
             }
         }
     }
 
-    private func transportButton(systemImage: String, help: String, action: @escaping () -> Void) -> some View {
+    private func transportButton(systemImage: String, help: String, height: CGFloat, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
+                .resizable()
+                .scaledToFit()
+                .frame(width: height, height: height)
         }
         .buttonStyle(.plain)
+        .frame(width: height, height: height)
         .help(help)
         .accessibilityLabel(help)
     }
@@ -150,6 +172,7 @@ struct NowPlayingBar: View {
         .font(.callout)
         .help(liveIndicatorTooltip)
         .quickTooltip(liveIndicatorTooltip)
+        .alignmentGuide(.progressRowCenter) { $0[VerticalAlignment.center] }
     }
 
     private var liveIndicatorTooltip: String {
