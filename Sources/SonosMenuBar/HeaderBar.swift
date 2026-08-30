@@ -8,15 +8,53 @@ struct HeaderBar: View {
     @ObservedObject var model: TopologyModel
     @ObservedObject var volume: VolumeModel
     @ObservedObject var playback: PlaybackModel
+    @ObservedObject var spotifySearch: SpotifySearchModel
+    @ObservedObject var spotifyAuth: SpotifyAuth
+    @Binding var selection: SidebarItem?
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(alignment: .top, spacing: 16) {
             nowPlaying
             Spacer(minLength: 12)
-            householdVolumeRow
+            VStack(alignment: .trailing, spacing: 8) {
+                spotifySearchField
+                householdVolumeRow
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// Searches Spotify from anywhere in the app, not just the Spotify page - submitting jumps
+    /// the sidebar to `.spotify` so the results are visible. Hidden rather than disabled when
+    /// signed out, since there's nothing useful to search yet.
+    @ViewBuilder
+    private var spotifySearchField: some View {
+        if spotifyAuth.isAuthenticated {
+            HStack(spacing: 4) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search Spotify", text: $spotifySearch.filter)
+                    .textFieldStyle(.plain)
+                    .frame(width: 180)
+                    .onSubmit {
+                        selection = .spotify
+                        spotifySearch.search()
+                    }
+                if !spotifySearch.filter.isEmpty {
+                    Button {
+                        spotifySearch.filter = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear filter")
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+        }
     }
 
     /// Album art and title/artist/album for whatever `playback` is currently reading. Reads

@@ -19,9 +19,8 @@ struct SpotifySearchPage: View {
                         browse: model,
                         topology: topology,
                         showsArtwork: model.openAlbum == nil,
-                        searchPrompt: "Search Spotify",
+                        showsFilterField: false,
                         groupsByCategory: model.currentLevel?.objectID == "SPOTIFY:root",
-                        onFilterSubmit: { model.search() },
                         emptyDescriptionOverride: "Search for a track, album, or playlist above, then press Return."
                     )
                 }

@@ -23,7 +23,14 @@ struct MainWindowView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HeaderBar(model: model, volume: volume, playback: playback)
+            HeaderBar(
+                model: model,
+                volume: volume,
+                playback: playback,
+                spotifySearch: spotifySearch,
+                spotifyAuth: spotifyAuth,
+                selection: $selection
+            )
             Divider()
             HStack(spacing: 0) {
                 SidebarView(selection: $selection)

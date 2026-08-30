@@ -134,24 +134,74 @@ struct NowPlayingBar: View {
 
     /// Replaces what used to be a Refresh button. The household pushes its changes now, and
     /// the subscription repairs itself, so there is nothing left for the user to trigger -
-    /// what they actually need to know is whether what they're looking at is current.
-    @ViewBuilder
+    /// what they actually need to know is whether what they're looking at is current. The
+    /// status itself only shows on hover now, so the bar doesn't carry a permanent line of
+    /// text for something that's true almost all the time.
     private var liveIndicator: some View {
-        if model.isReceivingLiveUpdates {
-            Label {
-                Text("Connected to Sonos")
-                    .foregroundStyle(.secondary)
-            } icon: {
+        Group {
+            if model.isReceivingLiveUpdates {
                 Image(systemName: "dot.radiowaves.left.and.right")
                     .foregroundStyle(.green)
+            } else {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
             }
-            .font(.callout)
-            .help("Changes made in the Sonos app show up here automatically.")
-        } else {
-            Label("Reconnecting…", systemImage: "exclamationmark.triangle")
-                .foregroundStyle(.orange)
-                .font(.callout)
-                .help("Not receiving updates from your speakers. Trying to reconnect.")
         }
+        .font(.callout)
+        .help(liveIndicatorTooltip)
+        .quickTooltip(liveIndicatorTooltip)
+    }
+
+    private var liveIndicatorTooltip: String {
+        model.isReceivingLiveUpdates
+            ? "Connected to Sonos"
+            : "Reconnecting…"
+    }
+}
+
+/// `.help()`'s tooltip follows the system's ~1.5s hover delay with no way to shorten it, so
+/// this shows the same text itself after a much shorter hover - `.help()` stays alongside it
+/// only for VoiceOver's accessibility hint.
+private struct QuickTooltipModifier: ViewModifier {
+    let text: String
+
+    @State private var showsTooltip = false
+    @State private var hoverTask: Task<Void, Never>?
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { isHovering in
+                hoverTask?.cancel()
+                if isHovering {
+                    hoverTask = Task {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        if !Task.isCancelled { showsTooltip = true }
+                    }
+                } else {
+                    showsTooltip = false
+                }
+            }
+            // Trailing rather than centered: this sits near the window's right edge, and a
+            // centered bubble would grow half past it and get clipped there.
+            .overlay(alignment: .topTrailing) {
+                if showsTooltip {
+                    Text(text)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+                        .fixedSize(horizontal: true, vertical: false)
+                        .offset(y: -28)
+                        .transition(.opacity)
+                        .zIndex(1)
+                }
+            }
+    }
+}
+
+private extension View {
+    func quickTooltip(_ text: String) -> some View {
+        modifier(QuickTooltipModifier(text: text))
     }
 }

@@ -17,6 +17,9 @@ struct MediaListView<Model: MediaBrowsing>: View {
     /// art once, so repeating it on every row is redundant.
     var showsArtwork = true
     var searchPrompt = "Filter"
+    /// `false` for Spotify search: the header owns that filter field now, so this page's own
+    /// copy would be a second box bound to the same text.
+    var showsFilterField = true
     /// Sections rows under "Songs"/"Albums"/"Playlists" headers instead of one flat list -
     /// meaningful only for Spotify search, whose rows carry a `category`. Sonos browse lists
     /// leave `category` `nil` on every row, which collapses back to the flat list either way.
@@ -64,7 +67,9 @@ struct MediaListView<Model: MediaBrowsing>: View {
                 Button("Clear Queue") { isConfirmingClear = true }
                     .controlSize(.small)
             }
-            filterField
+            if showsFilterField {
+                filterField
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
