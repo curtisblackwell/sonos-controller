@@ -41,8 +41,10 @@ struct MediaListView<Model: MediaBrowsing>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
+            if hasHeaderContent {
+                header
+                Divider()
+            }
             content
         }
         .confirmationDialog(
@@ -58,6 +60,16 @@ struct MediaListView<Model: MediaBrowsing>: View {
     }
 
     // MARK: - Header
+
+    /// Whether the header row has anything in it to show. Spotify search at its root has no
+    /// breadcrumb (nothing to go back to), no queue button, and no filter field of its own -
+    /// without this check, the header and its divider would still render as an empty bar with
+    /// a stray line under it.
+    private var hasHeaderContent: Bool {
+        browse.path.count > 1
+            || (showsQueueEditing && browse.items?.isEmpty == false)
+            || showsFilterField
+    }
 
     private var header: some View {
         HStack(spacing: 8) {
