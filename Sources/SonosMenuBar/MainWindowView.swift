@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// The window: a sidebar of pages, the selected page, and a now-playing bar across the
-/// bottom of both.
+/// The window: a header bar, a sidebar of pages, the selected page, and a now-playing bar
+/// across the bottom of both.
 ///
-/// The bar is deliberately outside the split view. It reports on the active group, which
-/// doesn't change when you switch pages, so nesting it in the detail column would make it
+/// Both bars are deliberately outside the split view. They report on the active group, which
+/// doesn't change when you switch pages, so nesting them in the detail column would make them
 /// look like a property of whatever page you happened to be on.
 struct MainWindowView: View {
     @ObservedObject var model: TopologyModel
@@ -23,13 +23,17 @@ struct MainWindowView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            NavigationSplitView {
+            HeaderBar(model: model, volume: volume, playback: playback)
+            Divider()
+            HStack(spacing: 0) {
                 SidebarView(selection: $selection)
-            } detail: {
+                    .frame(width: 200)
+                Divider()
                 detail
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             Divider()
-            NowPlayingBar(model: model, volume: volume, playback: playback)
+            NowPlayingBar(model: model, playback: playback)
         }
         .frame(minWidth: Self.minWindowWidth, minHeight: 420)
         .onChange(of: selection) { _, newSelection in
@@ -41,21 +45,18 @@ struct MainWindowView: View {
     @ViewBuilder
     private var detail: some View {
         let item = selection ?? .speakers
-        Group {
-            if let root = item.browseRoot {
-                BrowsePage(
-                    browse: browse,
-                    topology: model,
-                    root: root,
-                    showsQueueEditing: item == .queue,
-                    searchPrompt: "Filter \(item.title)"
-                )
-            } else if item == .spotify {
-                SpotifySearchPage(model: spotifySearch, auth: spotifyAuth, topology: model)
-            } else {
-                SpeakersPage(model: model, volume: volume)
-            }
+        if let root = item.browseRoot {
+            BrowsePage(
+                browse: browse,
+                topology: model,
+                root: root,
+                showsQueueEditing: item == .queue,
+                searchPrompt: "Filter \(item.title)"
+            )
+        } else if item == .spotify {
+            SpotifySearchPage(model: spotifySearch, auth: spotifyAuth, topology: model)
+        } else {
+            SpeakersPage(model: model, volume: volume)
         }
-        .navigationTitle(item.title)
     }
 }

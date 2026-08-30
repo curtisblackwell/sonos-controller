@@ -1,14 +1,13 @@
 import SwiftUI
 
-/// The persistent bar along the bottom of the window: what's playing, the transport, the
-/// seek slider, the household volume, and whether we're still hearing from the household.
+/// The persistent bar along the bottom of the window: the transport, the seek slider, and
+/// whether we're still hearing from the household.
 ///
 /// It sits below the whole split view rather than inside the detail column, because none of
 /// it is about the page you happen to be looking at - the active group and its playback are
 /// the same wherever you are.
 struct NowPlayingBar: View {
     @ObservedObject var model: TopologyModel
-    @ObservedObject var volume: VolumeModel
     @ObservedObject var playback: PlaybackModel
 
     /// Tracks the bar's own width so the seek slider can scale with the window. Starts at the
@@ -18,12 +17,10 @@ struct NowPlayingBar: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 16) {
-            nowPlaying
             Spacer(minLength: 12)
             VStack(spacing: 6) {
                 transportControls
                 progressRow
-                householdVolumeRow
             }
             Spacer(minLength: 12)
             VStack(alignment: .trailing, spacing: 4) {
@@ -52,46 +49,6 @@ struct NowPlayingBar: View {
                     }
             }
         }
-    }
-
-    /// Album art and title/artist/album for whatever `playback` is currently reading. Reads
-    /// as "Nothing Playing" rather than disappearing when there's no active group or no
-    /// track - `PlaybackModel` already reports that as `track == nil`.
-    private var nowPlaying: some View {
-        HStack(spacing: 8) {
-            albumArt
-            VStack(alignment: .leading, spacing: 2) {
-                Text(playback.track?.title ?? "Nothing Playing")
-                    .font(.callout.bold())
-                    .lineLimit(1)
-                Text(playback.track?.artist ?? " ")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Text(playback.track?.album ?? " ")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
-    }
-
-    private var albumArt: some View {
-        RoundedRectangle(cornerRadius: 4)
-            .fill(.quaternary)
-            .frame(width: 54, height: 54)
-            .overlay {
-                if let url = playback.track?.albumArtURL {
-                    AsyncImage(url: url) { image in
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        Image(systemName: "music.note").foregroundStyle(.secondary)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                } else {
-                    Image(systemName: "music.note").foregroundStyle(.secondary)
-                }
-            }
     }
 
     /// Elapsed time, a seek slider, and time remaining. Degrades on its own when nothing is
@@ -141,38 +98,6 @@ struct NowPlayingBar: View {
             return String(format: "%d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
         }
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
-    }
-
-    /// The household's own volume row, one rung up from the group sliders on the Speakers
-    /// page: every room in every group, moved in the same proportion. Paired with the same
-    /// "match to quietest" action a group row offers, just aimed at the whole household.
-    @ViewBuilder
-    private var householdVolumeRow: some View {
-        if !model.groups.isEmpty {
-            HStack(spacing: 8) {
-                VolumeSlider(
-                    value: volume.volumeForHousehold(),
-                    isMuted: volume.isHouseholdMuted(),
-                    label: "the whole house",
-                    setVolume: { volume.setHouseholdVolume($0) },
-                    toggleMute: { volume.toggleHouseholdMute() },
-                    onEditingChanged: { editing in
-                        if editing {
-                            volume.beginHouseholdDrag()
-                        } else {
-                            volume.endHouseholdDrag()
-                        }
-                    }
-                )
-
-                Button("Match Quietest") {
-                    volume.syncEverythingToQuietest()
-                }
-                .controlSize(.small)
-                .disabled(volume.isSyncing)
-                .help("Set every speaker in the house to the volume of the quietest one.")
-            }
-        }
     }
 
     /// Only shown once there's an active group to target - matches the star toggle that

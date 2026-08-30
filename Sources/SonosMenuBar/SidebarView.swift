@@ -67,7 +67,6 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
-        .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
     }
 
     private func row(_ item: SidebarItem) -> some View {

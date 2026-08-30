@@ -1,0 +1,93 @@
+import SwiftUI
+
+/// The bar across the top of the window: what's playing, and the household volume.
+///
+/// Sits outside the split view for the same reason `NowPlayingBar` does - the active
+/// group's track and the household volume don't change when you switch pages.
+struct HeaderBar: View {
+    @ObservedObject var model: TopologyModel
+    @ObservedObject var volume: VolumeModel
+    @ObservedObject var playback: PlaybackModel
+
+    var body: some View {
+        HStack(spacing: 16) {
+            nowPlaying
+            Spacer(minLength: 12)
+            householdVolumeRow
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    /// Album art and title/artist/album for whatever `playback` is currently reading. Reads
+    /// as "Nothing Playing" rather than disappearing when there's no active group or no
+    /// track - `PlaybackModel` already reports that as `track == nil`.
+    private var nowPlaying: some View {
+        HStack(spacing: 12) {
+            albumArt
+            VStack(alignment: .leading, spacing: 2) {
+                Text(playback.track?.title ?? "Nothing Playing")
+                    .font(.callout.bold())
+                    .lineLimit(1)
+                Text(playback.track?.artist ?? " ")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(playback.track?.album ?? " ")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var albumArt: some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(.quaternary)
+            .frame(width: 108, height: 108)
+            .overlay {
+                if let url = playback.track?.albumArtURL {
+                    AsyncImage(url: url) { image in
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Image(systemName: "music.note").foregroundStyle(.secondary)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                } else {
+                    Image(systemName: "music.note").foregroundStyle(.secondary)
+                }
+            }
+    }
+
+    /// The household's own volume row, one rung up from the group sliders on the Speakers
+    /// page: every room in every group, moved in the same proportion. Paired with the same
+    /// "match to quietest" action a group row offers, just aimed at the whole household.
+    @ViewBuilder
+    private var householdVolumeRow: some View {
+        if !model.groups.isEmpty {
+            HStack(spacing: 8) {
+                Button("Match Quietest") {
+                    volume.syncEverythingToQuietest()
+                }
+                .controlSize(.small)
+                .disabled(volume.isSyncing)
+                .help("Set every speaker in the house to the volume of the quietest one.")
+
+                VolumeSlider(
+                    value: volume.volumeForHousehold(),
+                    isMuted: volume.isHouseholdMuted(),
+                    label: "the whole house",
+                    setVolume: { volume.setHouseholdVolume($0) },
+                    toggleMute: { volume.toggleHouseholdMute() },
+                    onEditingChanged: { editing in
+                        if editing {
+                            volume.beginHouseholdDrag()
+                        } else {
+                            volume.endHouseholdDrag()
+                        }
+                    }
+                )
+            }
+        }
+    }
+}

@@ -36,6 +36,7 @@ final class MainWindowController: NSWindowController {
             defer: false
         )
         window.title = "Sonos"
+        window.titleVisibility = .hidden
         window.contentView = NSHostingView(
             rootView: MainWindowView(
                 model: model,
